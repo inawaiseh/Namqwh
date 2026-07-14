@@ -132,11 +132,21 @@ async function fetchWorkbookFromUrl(rawUrl) {
   const target = buildFetchTarget(rawUrl);
   const res = await fetch(target, { mode: "cors" });
   if (!res.ok) {
-    const err = new Error(`HTTP ${res.status}`);
+    let detail = "";
+    try {
+      detail = (await res.text()).slice(0, 300);
+    } catch {}
+    const err = new Error(`HTTP ${res.status}${detail ? ` — ${detail}` : ""}`);
     err.code = "HTTP_ERROR";
     throw err;
   }
+  const contentType = res.headers.get("Content-Type") || "";
   const buf = await res.arrayBuffer();
+  if (contentType.includes("text/html") || contentType.includes("application/json")) {
+    const err = new Error(`Response wasn't an Excel file (got "${contentType}"). This usually means the link led to a sign-in page instead of the raw file.`);
+    err.code = "NOT_A_FILE";
+    throw err;
+  }
   return XLSX.read(buf, { type: "array" });
 }
 
