@@ -33,6 +33,7 @@ const defaultSettings = {
   companyLogo: "",
   sharePointUrl: "https://company.sharepoint.com/sites/Inventory/Shared Documents/Master.xlsx",
   worksheetName: "Master File July-26",
+  proxyUrl: "",
   refreshIntervalSeconds: 60,
   dataSource: "sample",
   locale: "en",

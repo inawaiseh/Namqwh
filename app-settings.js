@@ -104,6 +104,10 @@ function renderSettings() {
           <span class="block text-[11px] text-erp-muted mt-1">${t("settings.worksheetNameHelp")}</span>
         </label>
         <p class="text-[11px] text-erp-muted">${t("settings.expectedColumns")}</p>
+        <label class="block"><span class="block text-xs font-medium text-erp-muted mb-1">${t("settings.proxyUrl")}</span>
+          <input id="setProxyUrl" class="field-input" placeholder="https://your-worker.workers.dev" value="${escapeAttr(s.proxyUrl || "")}" ${!isAdmin ? "disabled" : ""} />
+          <span class="block text-[11px] text-erp-muted mt-1">${t("settings.proxyUrlHelp")}</span>
+        </label>
         <label class="block"><span class="block text-xs font-medium text-erp-muted mb-1">${t("settings.refreshInterval")}</span>
           <select id="setInterval" class="field-input" ${!isAdmin ? "disabled" : ""}>
             <option value="0" ${s.refreshIntervalSeconds === 0 ? "selected" : ""}>${t("topbar.manual")}</option>
@@ -181,6 +185,7 @@ function renderSettings() {
         dataSource: document.getElementById("setDataSource").value,
         sharePointUrl: document.getElementById("setUrl").value,
         worksheetName: document.getElementById("setSheet").value,
+        proxyUrl: document.getElementById("setProxyUrl").value,
         refreshIntervalSeconds: Number(document.getElementById("setInterval").value),
         dashboardTitle: document.getElementById("setTitle").value,
         companyLogo: document.getElementById("setLogo").value,
@@ -221,6 +226,7 @@ function renderSettings() {
       }
       const url = document.getElementById("setUrl").value;
       const sheet = document.getElementById("setSheet").value;
+      SETTINGS.proxyUrl = document.getElementById("setProxyUrl").value;
       msgEl.innerHTML = msgBox(t("settings.testing"), "info");
       try {
         const result = await loadDataFromExcelUrl(url, sheet);

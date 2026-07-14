@@ -121,8 +121,15 @@ function toDirectDownloadUrl(rawUrl) {
 
 /* ---------- Fetch + parse ---------- */
 
+function buildFetchTarget(rawUrl) {
+  const direct = toDirectDownloadUrl(rawUrl);
+  const proxy = (SETTINGS.proxyUrl || "").trim();
+  if (!proxy) return direct;
+  return `${proxy.replace(/\/+$/, "")}?url=${encodeURIComponent(direct)}`;
+}
+
 async function fetchWorkbookFromUrl(rawUrl) {
-  const target = toDirectDownloadUrl(rawUrl);
+  const target = buildFetchTarget(rawUrl);
   const res = await fetch(target, { mode: "cors" });
   if (!res.ok) {
     const err = new Error(`HTTP ${res.status}`);
