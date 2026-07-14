@@ -1,0 +1,222 @@
+##FILE-START::erp-inventory-dashboard/src/app/settings/page.tsx::##
+"use client";
+
+import { useEffect, useState } from "react";
+import { Save, RefreshCw, PlugZap } from "lucide-react";
+import { useRole } from "@/components/providers/RoleProvider";
+import { useRefresh } from "@/components/providers/RefreshProvider";
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="block">
+      <span className="block text-xs font-medium text-erp-muted mb-1">{label}</span>
+      {children}
+    </label>
+  );
+}
+
+export default function SettingsPage() {
+  const { role } = useRole();
+  const { manualRefresh, setIntervalSeconds } = useRefresh();
+  const [form, setForm] = useState<any>(null);
+  const [saving, setSaving] = useState(false);
+  const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [testing, setTesting] = useState(false);
+  const [savedMsg, setSavedMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch("/api/settings")
+      .then((r) => r.json())
+      .then(setForm);
+  }, []);
+
+  const isAdmin = role === "Admin";
+
+  function update(field: string, value: any) {
+    setForm((f: any) => ({ ...f, [field]: value }));
+  }
+
+  async function save() {
+    setSaving(true);
+    setSavedMsg(null);
+    try {
+      const res = await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+      const json = await res.json();
+      setForm(json);
+      setIntervalSeconds(json.refreshIntervalSeconds);
+      setSavedMsg("Settings saved. Reloading data from the configured source...");
+      manualRefresh();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function testConnection() {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const res = await fetch("/api/graph/test-connection", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sharePointUrl: form.sharePointUrl, worksheetName: form.worksheetName }),
+      });
+      const json = await res.json();
+      setTestResult(json);
+    } finally {
+      setTesting(false);
+    }
+  }
+
+  if (!form) return <p className="text-sm text-erp-muted">Loading settings...</p>;
+
+  return (
+    <div className="space-y-6 max-w-3xl">
+      <div>
+        <h1 className="text-xl font-bold text-slate-800 dark:text-white">Settings</h1>
+        <p className="text-sm text-erp-muted">
+          Configure the SharePoint data source, refresh cadence, and branding. No code changes required.
+        </p>
+      </div>
+
+      {!isAdmin && (
+        <div className="text-sm bg-amber-50 border border-amber-200 text-amber-800 rounded-lg px-3 py-2">
+          You are viewing Settings as <strong>{role}</strong>. Only the Admin role can modify these settings.
+        </div>
+      )}
+
+      <div className="bg-erp-card dark:bg-slate-800 rounded-xl2 border border-erp-border dark:border-slate-700 shadow-card p-5 space-y-4">
+        <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">Data Source</h3>
+
+        <Field label="Data Source Mode">
+          <select disabled={!isAdmin} value={form.dataSource} onChange={(e) => update("dataSource", e.target.value)} className="input">
+            <option value="sample">Sample Data (generated locally)</option>
+            <option value="live">Live SharePoint (Microsoft Graph)</option>
+          </select>
+        </Field>
+
+        <Field label="SharePoint File URL">
+          <input
+            disabled={!isAdmin}
+            value={form.sharePointUrl}
+            onChange={(e) => update("sharePointUrl", e.target.value)}
+            className="input"
+            placeholder="https://company.sharepoint.com/sites/Inventory/Shared Documents/Master.xlsx"
+          />
+        </Field>
+
+        <Field label="Worksheet Name">
+          <input
+            disabled={!isAdmin}
+            value={form.worksheetName}
+            onChange={(e) => update("worksheetName", e.target.value)}
+            className="input"
+            placeholder="Master File July-26"
+          />
+        </Field>
+
+        <Field label="Refresh Interval">
+          <select
+            disabled={!isAdmin}
+            value={form.refreshIntervalSeconds}
+            onChange={(e) => update("refreshIntervalSeconds", Number(e.target.value))}
+            className="input"
+          >
+            <option value={0}>Manual Only</option>
+            <option value={30}>30 Seconds</option>
+            <option value={60}>1 Minute</option>
+            <option value={300}>5 Minutes</option>
+          </select>
+        </Field>
+      </div>
+
+      <div className="bg-erp-card dark:bg-slate-800 rounded-xl2 border border-erp-border dark:border-slate-700 shadow-card p-5 space-y-4">
+        <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">Branding</h3>
+        <Field label="Dashboard Title">
+          <input disabled={!isAdmin} value={form.dashboardTitle} onChange={(e) => update("dashboardTitle", e.target.value)} className="input" />
+        </Field>
+        <Field label="Company Logo URL">
+          <input
+            disabled={!isAdmin}
+            value={form.companyLogo}
+            onChange={(e) => update("companyLogo", e.target.value)}
+            className="input"
+            placeholder="https://.../logo.png"
+          />
+        </Field>
+        <Field label="Theme">
+          <select disabled={!isAdmin} value={form.theme} onChange={(e) => update("theme", e.target.value)} className="input">
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+          </select>
+        </Field>
+      </div>
+
+      {isAdmin && (
+        <div className="flex flex-wrap gap-2">
+          <button onClick={save} disabled={saving} className="flex items-center gap-1 text-sm bg-erp-accent text-white rounded-lg px-4 py-2 disabled:opacity-50">
+            <Save size={15} /> Save
+          </button>
+          <button onClick={manualRefresh} className="flex items-center gap-1 text-sm border border-erp-border rounded-lg px-4 py-2 hover:bg-erp-bg">
+            <RefreshCw size={15} /> Reload Data
+          </button>
+          <button
+            onClick={testConnection}
+            disabled={testing}
+            className="flex items-center gap-1 text-sm border border-erp-border rounded-lg px-4 py-2 hover:bg-erp-bg disabled:opacity-50"
+          >
+            <PlugZap size={15} /> Test Connection
+          </button>
+        </div>
+      )}
+
+      {savedMsg && <div className="text-sm bg-green-50 border border-green-200 text-green-700 rounded-lg px-3 py-2">{savedMsg}</div>}
+      {testResult && (
+        <div
+          className={`text-sm rounded-lg px-3 py-2 border ${
+            testResult.ok ? "bg-green-50 border-green-200 text-green-700" : "bg-amber-50 border-amber-200 text-amber-800"
+          }`}
+        >
+          {testResult.message}
+        </div>
+      )}
+
+      <p className="text-xs text-erp-muted">
+        Live SharePoint mode requires an Azure AD app registration configured via the server&apos;s <code>.env</code> file
+        (AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET). See the README for setup steps. Until configured, the
+        app runs entirely on generated sample data so it is fully usable out of the box.
+      </p>
+    </div>
+  );
+}
+##FILE-END::##
+##FILE-START::erp-inventory-dashboard/scripts/generate-sample-data.js::##
+/**
+ * Standalone CLI wrapper around the sample-data generator.
+ * Not required for `npm run dev` (the API route generates the file automatically
+ * on first request), but useful if you want to regenerate/inspect it manually:
+ *
+ *   npm run seed
+ */
+const path = require("path");
+
+async function main() {
+  // Use ts-node-less approach: re-implement a thin call into the compiled lib
+  // isn't available pre-build, so we just require the TS source via Next's
+  // register is not trivial in a plain script. Simplest reliable approach:
+  // start the dev/prod server once and hit the inventory API, which triggers
+  // ensureSampleWorkbook() on the server side.
+  console.log(
+    "This sample workbook is generated automatically the first time the app reads inventory data."
+  );
+  console.log("Run `npm run dev` (or `npm run build && npm run start`) and open the app —");
+  console.log("data/sample/Master.xlsx will be created for you on the first request.");
+  console.log("\nIf you specifically want the file without starting the full app, open");
+  console.log(path.join("src", "lib", "sampleData.ts"), "and call ensureSampleWorkbook() from a small ts-node script.");
+}
+
+main();
+##FILE-END::##

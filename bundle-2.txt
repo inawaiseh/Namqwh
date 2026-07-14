@@ -1,0 +1,278 @@
+##FILE-START::erp-inventory-dashboard/src/lib/types.ts::##
+export type BrandKey =
+  | "Namq"
+  | "Breehant"
+  | "Roastery"
+  | "Tando"
+  | "Avola"
+  | "Laundah";
+
+export type OrderStatus =
+  | "Order Now"
+  | "In Stock"
+  | "On Order"
+  | "Over Stock"
+  | "Critical";
+
+export type Criticality = "High" | "Medium" | "Low";
+
+export interface InventoryItem {
+  itemCode: string;
+  description: string;
+  itemDescription: string;
+  brands: Record<BrandKey, boolean>;
+  usedByBrands: number;
+  monthlyDemand: number;
+  currentStocks: number;
+  coverage: number;
+  orderStatus: OrderStatus;
+  criticality: Criticality;
+  minStockLevel: number;
+  maxStockLevel: number;
+  orderQty: number;
+  leadTime: number;
+  classification: string;
+  price: number;
+  supplier: string;
+  paymentToReachOptimum: number;
+  monthlyStockCost: number;
+  category: string;
+  categoryCode: string;
+  categorySlug: string;
+}
+
+export interface EnrichedInventoryItem extends InventoryItem {
+  inventoryValue: number;
+  abcClass: "A" | "B" | "C";
+  xyzClass: "X" | "Y" | "Z";
+  fsnClass: "Fast Moving" | "Slow Moving" | "Non Moving";
+  isDeadStock: boolean;
+  daysWithoutUsage: number;
+}
+
+export interface AppSettings {
+  dashboardTitle: string;
+  companyLogo: string;
+  sharePointUrl: string;
+  worksheetName: string;
+  refreshIntervalSeconds: number; // 0 = manual only
+  theme: "light" | "dark";
+  dataSource: "sample" | "live";
+  locale: "en" | "ar";
+  companies: { name: string; sharePointUrl: string; worksheetName: string }[];
+}
+
+export type AlertSeverity = "critical" | "warning" | "info";
+
+export interface AlertItem {
+  id: string;
+  type: string;
+  severity: AlertSeverity;
+  itemCode?: string;
+  description?: string;
+  message: string;
+  createdAt: string;
+}
+
+export interface PurchaseRecommendation {
+  itemCode: string;
+  description: string;
+  supplier: string;
+  category: string;
+  criticality: Criticality;
+  currentStocks: number;
+  monthlyDemand: number;
+  coverage: number;
+  leadTime: number;
+  recommendedOrderQty: number;
+  recommendedOrderDate: string;
+  estimatedStockOutDate: string;
+  estimatedArrivalDate: string;
+  estimatedPayment: number;
+  priority: "Urgent" | "High" | "Medium" | "Low";
+}
+
+export interface PurchaseOrderLine {
+  itemCode: string;
+  description: string;
+  qty: number;
+  unitPrice: number;
+  totalCost: number;
+}
+
+export interface PurchaseOrder {
+  poNumber: string;
+  supplier: string;
+  createdAt: string;
+  expectedDeliveryDate: string;
+  leadTime: number;
+  status: "Draft" | "Sent" | "Confirmed" | "Received" | "Cancelled";
+  lines: PurchaseOrderLine[];
+  totalCost: number;
+}
+
+export interface MovementRecord {
+  timestamp: string;
+  user: string;
+  itemCode: string;
+  previousStock: number;
+  newStock: number;
+  difference: number;
+  reason: string;
+  sourceFile: string;
+  workbook: string;
+  worksheet: string;
+}
+##FILE-END::##
+##FILE-START::erp-inventory-dashboard/src/lib/constants.ts::##
+import { BrandKey } from "./types";
+
+export const BRANDS: BrandKey[] = [
+  "Namq",
+  "Breehant",
+  "Roastery",
+  "Tando",
+  "Avola",
+  "Laundah",
+];
+
+export const CATEGORY_MAP: Record<string, { name: string; slug: string }> = {
+  CO: { name: "Consumables", slug: "consumables" },
+  PM: { name: "Packaging Materials", slug: "packaging-materials" },
+  RM: { name: "Raw Materials", slug: "raw-materials" },
+  FA: { name: "Fixed Assets", slug: "fixed-assets" },
+  GB: { name: "Green Beans", slug: "green-beans" },
+  FPB: { name: "Finished Products", slug: "finished-products" },
+};
+
+export const CATEGORY_LIST = Object.entries(CATEGORY_MAP).map(([code, v]) => ({
+  code,
+  ...v,
+}));
+
+export const CATEGORY_BY_SLUG: Record<string, { code: string; name: string; slug: string }> =
+  Object.fromEntries(CATEGORY_LIST.map((c) => [c.slug, c]));
+
+export const SUPPLIERS = [
+  "Al Rawda Trading Co.",
+  "Gulf Packaging Solutions",
+  "Highland Coffee Exporters",
+  "Metro Industrial Supplies",
+  "Nordic Roasting Equipment",
+  "Prime Consumables LLC",
+  "Sahara Raw Materials",
+  "Star Logistics & Supply",
+  "Union Fixed Assets Ltd.",
+  "Zenith Packaging Group",
+];
+
+export const STATUS_COLORS: Record<string, string> = {
+  "Order Now": "bg-amber-100 text-amber-800 border-amber-300",
+  "In Stock": "bg-green-100 text-green-800 border-green-300",
+  "On Order": "bg-blue-100 text-blue-800 border-blue-300",
+  "Over Stock": "bg-purple-100 text-purple-800 border-purple-300",
+  Critical: "bg-red-100 text-red-800 border-red-300",
+};
+
+export const CRITICALITY_COLORS: Record<string, string> = {
+  High: "bg-red-100 text-red-700",
+  Medium: "bg-amber-100 text-amber-700",
+  Low: "bg-slate-100 text-slate-700",
+};
+##FILE-END::##
+##FILE-START::erp-inventory-dashboard/src/lib/categorize.ts::##
+import { CATEGORY_MAP } from "./constants";
+
+export function categoryFromItemCode(code: string) {
+  const upper = (code || "").toUpperCase();
+  const prefixes = Object.keys(CATEGORY_MAP).sort((a, b) => b.length - a.length);
+  const prefix = prefixes.find((p) => upper.startsWith(p));
+  if (!prefix) {
+    return { code: "OTHER", name: "Uncategorized", slug: "uncategorized" };
+  }
+  return { code: prefix, ...CATEGORY_MAP[prefix] };
+}
+##FILE-END::##
+##FILE-START::erp-inventory-dashboard/src/lib/settingsStore.ts::##
+import fs from "fs";
+import path from "path";
+import { AppSettings } from "./types";
+
+const DATA_DIR = path.join(process.cwd(), "data");
+const SETTINGS_PATH = path.join(DATA_DIR, "settings.json");
+
+const DEFAULT_SETTINGS: AppSettings = {
+  dashboardTitle: "Inventory ERP",
+  companyLogo: "",
+  sharePointUrl:
+    "https://company.sharepoint.com/sites/Inventory/Shared%20Documents/Master.xlsx",
+  worksheetName: "Master File July-26",
+  refreshIntervalSeconds: 60,
+  theme: "light",
+  dataSource: "sample",
+  locale: "en",
+  companies: [
+    {
+      name: "Default Company",
+      sharePointUrl:
+        "https://company.sharepoint.com/sites/Inventory/Shared%20Documents/Master.xlsx",
+      worksheetName: "Master File July-26",
+    },
+  ],
+};
+
+function ensureDataDir() {
+  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+}
+
+export function getSettings(): AppSettings {
+  ensureDataDir();
+  if (!fs.existsSync(SETTINGS_PATH)) {
+    fs.writeFileSync(SETTINGS_PATH, JSON.stringify(DEFAULT_SETTINGS, null, 2));
+    return DEFAULT_SETTINGS;
+  }
+  try {
+    const raw = fs.readFileSync(SETTINGS_PATH, "utf8");
+    return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
+  } catch {
+    return DEFAULT_SETTINGS;
+  }
+}
+
+export function saveSettings(partial: Partial<AppSettings>): AppSettings {
+  ensureDataDir();
+  const current = getSettings();
+  const updated = { ...current, ...partial };
+  fs.writeFileSync(SETTINGS_PATH, JSON.stringify(updated, null, 2));
+  return updated;
+}
+##FILE-END::##
+##FILE-START::erp-inventory-dashboard/src/lib/movementHistory.ts::##
+import fs from "fs";
+import path from "path";
+import { MovementRecord } from "./types";
+
+const DATA_DIR = path.join(process.cwd(), "data");
+const HISTORY_PATH = path.join(DATA_DIR, "movement-history.json");
+
+function ensureFile() {
+  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+  if (!fs.existsSync(HISTORY_PATH)) fs.writeFileSync(HISTORY_PATH, "[]");
+}
+
+export function getMovementHistory(itemCode?: string): MovementRecord[] {
+  ensureFile();
+  const all: MovementRecord[] = JSON.parse(fs.readFileSync(HISTORY_PATH, "utf8"));
+  const sorted = all.sort(
+    (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+  );
+  return itemCode ? sorted.filter((r) => r.itemCode === itemCode) : sorted;
+}
+
+export function appendMovement(record: MovementRecord) {
+  ensureFile();
+  const all: MovementRecord[] = JSON.parse(fs.readFileSync(HISTORY_PATH, "utf8"));
+  all.push(record);
+  fs.writeFileSync(HISTORY_PATH, JSON.stringify(all.slice(-2000), null, 2));
+}
+##FILE-END::##

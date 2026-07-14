@@ -1,0 +1,222 @@
+##FILE-START::erp-inventory-dashboard/src/lib/format.ts::##
+export function formatCurrency(n: number) {
+  if (n === undefined || n === null || isNaN(n)) return "-";
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  }).format(n);
+}
+
+export function formatNumber(n: number, decimals = 0) {
+  if (n === undefined || n === null || isNaN(n)) return "-";
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: decimals,
+    minimumFractionDigits: decimals,
+  }).format(n);
+}
+
+export function formatDate(iso: string) {
+  if (!iso) return "-";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "2-digit" });
+}
+##FILE-END::##
+##FILE-START::erp-inventory-dashboard/src/components/inventory/InventoryGrid.tsx::##
+"use client";
+
+import { useMemo, useState } from "react";
+import { AgGridReact } from "ag-grid-react";
+import type { ColDef } from "ag-grid-community";
+import Link from "next/link";
+import { Download, FileSpreadsheet, FileText, Search } from "lucide-react";
+import { EnrichedInventoryItem, BrandKey } from "@/lib/types";
+import { BRANDS } from "@/lib/constants";
+import { formatCurrency, formatNumber } from "@/lib/format";
+import { StatusBadge, CriticalityBadge } from "@/components/ui/StatusBadge";
+import { exportToCSV, exportToExcel, exportToPDF } from "@/lib/exportUtils";
+
+function ItemCodeCell(props: any) {
+  return (
+    <Link href={`/inventory/${props.value}`} className="text-erp-accent font-semibold hover:underline">
+      {props.value}
+    </Link>
+  );
+}
+
+function StatusCell(props: any) {
+  return <StatusBadge status={props.value} />;
+}
+
+function CriticalityCell(props: any) {
+  return <CriticalityBadge level={props.value} />;
+}
+
+export function InventoryGrid({
+  items,
+  initialSearch = "",
+}: {
+  items: EnrichedInventoryItem[];
+  initialSearch?: string;
+}) {
+  const [search, setSearch] = useState(initialSearch);
+  const [category, setCategory] = useState("All");
+  const [supplier, setSupplier] = useState("All");
+  const [classification, setClassification] = useState("All");
+  const [criticality, setCriticality] = useState("All");
+  const [orderStatus, setOrderStatus] = useState("All");
+  const [brand, setBrand] = useState("All");
+
+  const categories = useMemo(() => ["All", ...Array.from(new Set(items.map((i) => i.category)))], [items]);
+  const suppliers = useMemo(() => ["All", ...Array.from(new Set(items.map((i) => i.supplier).filter(Boolean)))], [items]);
+  const classifications = useMemo(() => ["All", ...Array.from(new Set(items.map((i) => i.classification).filter(Boolean)))], [items]);
+
+  const filtered = useMemo(() => {
+    return items.filter((i) => {
+      if (category !== "All" && i.category !== category) return false;
+      if (supplier !== "All" && i.supplier !== supplier) return false;
+      if (classification !== "All" && i.classification !== classification) return false;
+      if (criticality !== "All" && i.criticality !== criticality) return false;
+      if (orderStatus !== "All" && i.orderStatus !== orderStatus) return false;
+      if (brand !== "All" && !i.brands[brand as BrandKey]) return false;
+      return true;
+    });
+  }, [items, category, supplier, classification, criticality, orderStatus, brand]);
+
+  const columnDefs = useMemo<ColDef[]>(
+    () => [
+      { headerName: "Item Code", field: "itemCode", pinned: "left", width: 130, cellRenderer: ItemCodeCell },
+      { headerName: "Description", field: "description", width: 220 },
+      { headerName: "Category", field: "category", width: 160 },
+      { headerName: "Supplier", field: "supplier", width: 180 },
+      { headerName: "Monthly Demand", field: "monthlyDemand", width: 140, valueFormatter: (p) => formatNumber(p.value) },
+      { headerName: "Current Stocks", field: "currentStocks", width: 140, valueFormatter: (p) => formatNumber(p.value) },
+      { headerName: "Coverage (d)", field: "coverage", width: 130, valueFormatter: (p) => formatNumber(p.value) },
+      { headerName: "Order Status", field: "orderStatus", width: 140, cellRenderer: StatusCell },
+      { headerName: "Criticality", field: "criticality", width: 120, cellRenderer: CriticalityCell },
+      { headerName: "Min Stock", field: "minStockLevel", width: 110, valueFormatter: (p) => formatNumber(p.value) },
+      { headerName: "Max Stock", field: "maxStockLevel", width: 110, valueFormatter: (p) => formatNumber(p.value) },
+      { headerName: "Order QTY", field: "orderQty", width: 110, valueFormatter: (p) => formatNumber(p.value) },
+      { headerName: "Lead Time (d)", field: "leadTime", width: 120, valueFormatter: (p) => formatNumber(p.value) },
+      { headerName: "Classification", field: "classification", width: 140 },
+      { headerName: "ABC", field: "abcClass", width: 80 },
+      { headerName: "XYZ", field: "xyzClass", width: 80 },
+      { headerName: "Price", field: "price", width: 110, valueFormatter: (p) => formatCurrency(p.value) },
+      { headerName: "Inventory Value", field: "inventoryValue", width: 140, valueFormatter: (p) => formatCurrency(p.value) },
+      { headerName: "Monthly Stock Cost", field: "monthlyStockCost", width: 160, valueFormatter: (p) => formatCurrency(p.value) },
+      { headerName: "Payment Required", field: "paymentToReachOptimum", width: 160, valueFormatter: (p) => formatCurrency(p.value) },
+    ],
+    []
+  );
+
+  const defaultColDef = useMemo<ColDef>(
+    () => ({ sortable: true, filter: true, resizable: true }),
+    []
+  );
+
+  function exportRows() {
+    return filtered.map((i) => ({
+      "Item Code": i.itemCode,
+      Description: i.description,
+      Category: i.category,
+      Supplier: i.supplier,
+      "Monthly Demand": i.monthlyDemand,
+      "Current Stocks": i.currentStocks,
+      Coverage: i.coverage,
+      "Order Status": i.orderStatus,
+      Criticality: i.criticality,
+      "Min Stock": i.minStockLevel,
+      "Max Stock": i.maxStockLevel,
+      "Order QTY": i.orderQty,
+      "Lead Time": i.leadTime,
+      Classification: i.classification,
+      Price: i.price,
+      "Inventory Value": i.inventoryValue,
+      "Monthly Stock Cost": i.monthlyStockCost,
+      "Payment Required": i.paymentToReachOptimum,
+    }));
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="bg-erp-card dark:bg-slate-800 rounded-xl2 border border-erp-border dark:border-slate-700 shadow-card p-3 flex flex-wrap gap-2 items-center">
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search item, description, supplier..."
+            className="pl-8 pr-3 py-2 text-sm rounded-lg border border-erp-border w-64 focus:outline-none focus:ring-2 focus:ring-erp-accent"
+          />
+        </div>
+
+        <select className="text-sm border border-erp-border rounded-lg px-2 py-2" value={category} onChange={(e) => setCategory(e.target.value)}>
+          {categories.map((c) => (
+            <option key={c} value={c}>{c === "All" ? "All Categories" : c}</option>
+          ))}
+        </select>
+
+        <select className="text-sm border border-erp-border rounded-lg px-2 py-2" value={supplier} onChange={(e) => setSupplier(e.target.value)}>
+          {suppliers.map((s) => (
+            <option key={s} value={s}>{s === "All" ? "All Suppliers" : s}</option>
+          ))}
+        </select>
+
+        <select className="text-sm border border-erp-border rounded-lg px-2 py-2" value={classification} onChange={(e) => setClassification(e.target.value)}>
+          {classifications.map((c) => (
+            <option key={c} value={c}>{c === "All" ? "All Classifications" : c}</option>
+          ))}
+        </select>
+
+        <select className="text-sm border border-erp-border rounded-lg px-2 py-2" value={criticality} onChange={(e) => setCriticality(e.target.value)}>
+          {["All", "High", "Medium", "Low"].map((c) => (
+            <option key={c} value={c}>{c === "All" ? "All Criticality" : c}</option>
+          ))}
+        </select>
+
+        <select className="text-sm border border-erp-border rounded-lg px-2 py-2" value={orderStatus} onChange={(e) => setOrderStatus(e.target.value)}>
+          {["All", "Order Now", "In Stock", "On Order", "Over Stock", "Critical"].map((c) => (
+            <option key={c} value={c}>{c === "All" ? "All Order Status" : c}</option>
+          ))}
+        </select>
+
+        <select className="text-sm border border-erp-border rounded-lg px-2 py-2" value={brand} onChange={(e) => setBrand(e.target.value)}>
+          <option value="All">All Brands</option>
+          {BRANDS.map((b) => (
+            <option key={b} value={b}>{b}</option>
+          ))}
+        </select>
+
+        <div className="ml-auto flex gap-2">
+          <button onClick={() => exportToCSV(exportRows(), "inventory")} className="flex items-center gap-1 text-xs border border-erp-border rounded-lg px-3 py-2 hover:bg-erp-bg">
+            <Download size={14} /> CSV
+          </button>
+          <button onClick={() => exportToExcel(exportRows(), "inventory")} className="flex items-center gap-1 text-xs border border-erp-border rounded-lg px-3 py-2 hover:bg-erp-bg">
+            <FileSpreadsheet size={14} /> Excel
+          </button>
+          <button onClick={() => exportToPDF(exportRows(), "inventory", "Inventory Report")} className="flex items-center gap-1 text-xs border border-erp-border rounded-lg px-3 py-2 hover:bg-erp-bg">
+            <FileText size={14} /> PDF
+          </button>
+        </div>
+      </div>
+
+      <div className="ag-theme-quartz rounded-xl2 overflow-hidden border border-erp-border shadow-card" style={{ height: 640, width: "100%" }}>
+        <AgGridReact
+          rowData={filtered}
+          columnDefs={columnDefs}
+          defaultColDef={defaultColDef}
+          quickFilterText={search}
+          pagination
+          paginationPageSize={50}
+          paginationPageSizeSelector={[25, 50, 100, 200]}
+          animateRows
+          rowHeight={40}
+          headerHeight={42}
+        />
+      </div>
+      <div className="text-xs text-erp-muted">{filtered.length} of {items.length} items shown</div>
+    </div>
+  );
+}
+##FILE-END::##

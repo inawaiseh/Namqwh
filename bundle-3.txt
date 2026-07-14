@@ -1,0 +1,837 @@
+##FILE-START::erp-inventory-dashboard/src/lib/sampleData.ts::##
+import fs from "fs";
+import path from "path";
+import * as XLSX from "xlsx";
+import { BRANDS, CATEGORY_LIST, SUPPLIERS } from "./constants";
+
+export const SAMPLE_DIR = path.join(process.cwd(), "data", "sample");
+export const SAMPLE_WORKBOOK_PATH = path.join(SAMPLE_DIR, "Master.xlsx");
+export const SAMPLE_WORKSHEET_NAME = "Master File July-26";
+
+export const HEADERS = [
+  "Item Code",
+  "Description",
+  "Item Description",
+  "Namq",
+  "Breehant",
+  "Roastery",
+  "Tando",
+  "Avola",
+  "Laundah",
+  "Used by # Brands",
+  "Monthly Demand",
+  "Current Stocks",
+  "Coverage",
+  "Order Status",
+  "Criticality",
+  "Minimum Stock Level",
+  "Maximum Stock Level",
+  "Order QTY",
+  "Lead Time",
+  "Classification",
+  "Price",
+  "Supplier",
+  "Payment To Reach Optimum",
+  "Monthly Stock Cost",
+];
+
+function mulberry32(seed: number) {
+  return function () {
+    seed |= 0;
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const NAME_POOL: Record<string, string[]> = {
+  CO: [
+    "Cleaning Detergent",
+    "Filter Papers",
+    "Lubricant Oil",
+    "Hand Gloves",
+    "Safety Masks",
+    "Cleaning Cloths",
+    "Machine Grease",
+    "Sanitizer Solution",
+    "Paper Towels",
+    "Trash Bags",
+  ],
+  PM: [
+    "Kraft Paper Bags",
+    "Valve Bags 1kg",
+    "Valve Bags 250g",
+    "Poly Liners",
+    "Corrugated Boxes",
+    "Shrink Wrap Film",
+    "Label Rolls",
+    "Tin Ties",
+    "Zip Pouches 500g",
+    "Carton Tape",
+  ],
+  RM: [
+    "Sugar (Bulk)",
+    "Milk Powder",
+    "Cocoa Powder",
+    "Vanilla Extract",
+    "Cinnamon Sticks",
+    "Flavoring Syrup Base",
+    "Caramel Base",
+    "Powdered Creamer",
+    "Chocolate Chips",
+    "Honey (Bulk)",
+  ],
+  FA: [
+    "Espresso Machine",
+    "Coffee Roaster Drum",
+    "Industrial Grinder",
+    "Packing Line Conveyor",
+    "Forklift",
+    "Cold Storage Unit",
+    "Industrial Weighing Scale",
+    "Nitrogen Flushing Unit",
+    "Vacuum Sealer",
+    "Delivery Van",
+  ],
+  GB: [
+    "Ethiopia Yirgacheffe",
+    "Colombia Supremo",
+    "Brazil Santos",
+    "Guatemala Antigua",
+    "Kenya AA",
+    "Vietnam Robusta",
+    "Honduras HG",
+    "Costa Rica Tarrazu",
+    "Sumatra Mandheling",
+    "Panama Geisha",
+  ],
+  FPB: [
+    "Roasted Blend 250g",
+    "Roasted Blend 1kg",
+    "Single Origin 250g",
+    "Espresso Blend 1kg",
+    "Drip Bags Box",
+    "Instant Coffee Sachets",
+    "Cold Brew Concentrate",
+    "Coffee Capsules Box",
+    "Decaf Blend 250g",
+    "Specialty Reserve 250g",
+  ],
+};
+
+const CATEGORY_CONFIG: Record<
+  string,
+  { count: number; price: [number, number]; demand: [number, number]; lead: [number, number] }
+> = {
+  CO: { count: 20, price: [5, 80], demand: [50, 800], lead: [7, 20] },
+  PM: { count: 20, price: [2, 60], demand: [100, 2000], lead: [10, 30] },
+  RM: { count: 20, price: [10, 200], demand: [200, 3000], lead: [20, 60] },
+  FA: { count: 15, price: [500, 15000], demand: [1, 10], lead: [30, 120] },
+  GB: { count: 15, price: [15, 40], demand: [500, 5000], lead: [30, 90] },
+  FPB: { count: 20, price: [20, 150], demand: [100, 1500], lead: [5, 15] },
+};
+
+function pick<T>(arr: T[], rng: () => number) {
+  return arr[Math.floor(rng() * arr.length)];
+}
+
+function randInt(min: number, max: number, rng: () => number) {
+  return Math.floor(min + rng() * (max - min + 1));
+}
+
+function randFloat(min: number, max: number, rng: () => number) {
+  return +(min + rng() * (max - min)).toFixed(2);
+}
+
+function shuffle<T>(arr: T[], rng: () => number) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function statusFromCoverage(coverage: number, leadTime: number, currentStocks: number) {
+  if (currentStocks <= 0) return "Critical";
+  if (coverage < leadTime) return "Critical";
+  if (coverage < leadTime * 1.5) return "Order Now";
+  if (coverage <= 90) return "In Stock";
+  if (coverage <= 150) return "In Stock";
+  return "Over Stock";
+}
+
+export function generateSampleRows(): Record<string, any>[] {
+  const rng = mulberry32(42);
+  const rows: Record<string, any>[] = [];
+
+  CATEGORY_LIST.forEach(({ code }) => {
+    const cfg = CATEGORY_CONFIG[code];
+    const names = NAME_POOL[code];
+    for (let i = 0; i < cfg.count; i++) {
+      const itemCode = `${code}-${String(i + 1).padStart(3, "0")}`;
+      const baseName = names[i % names.length];
+      const lot = Math.floor(i / names.length);
+      const description = lot > 0 ? `${baseName} (Lot ${lot + 1})` : baseName;
+
+      const price = randFloat(cfg.price[0], cfg.price[1], rng);
+      const monthlyDemand = randInt(cfg.demand[0], cfg.demand[1], rng);
+      const leadTime = randInt(cfg.lead[0], cfg.lead[1], rng);
+
+      // spread coverage across a wide band so all order-status buckets appear
+      const coverageDays = randInt(2, 160, rng);
+      const currentStocks = Math.round((monthlyDemand / 30) * coverageDays);
+      const coverage = monthlyDemand > 0 ? +((currentStocks / (monthlyDemand / 30)) || 0).toFixed(1) : 0;
+
+      let orderStatus = statusFromCoverage(coverage, leadTime, currentStocks);
+      // introduce some explicit "On Order" states for variety
+      if (orderStatus !== "Critical" && i % 7 === 3) orderStatus = "On Order";
+
+      const criticality =
+        orderStatus === "Critical"
+          ? "High"
+          : orderStatus === "Order Now"
+          ? rng() < 0.6
+            ? "High"
+            : "Medium"
+          : orderStatus === "Over Stock"
+          ? rng() < 0.7
+            ? "Low"
+            : "Medium"
+          : rng() < 0.5
+          ? "Medium"
+          : "Low";
+
+      const minStockLevel = Math.round(monthlyDemand * 0.5);
+      const maxStockLevel = Math.round(monthlyDemand * randFloat(2, 3, rng));
+      const orderQty = Math.max(0, maxStockLevel - currentStocks);
+
+      const classification = pick(
+        ["Fast Moving", "Strategic", "Bulk Item", "Standard", "Seasonal"],
+        rng
+      );
+
+      const supplier = pick(SUPPLIERS, rng);
+
+      const usedByCount =
+        code === "RM" || code === "GB" || code === "PM" || code === "CO"
+          ? randInt(2, 6, rng)
+          : randInt(1, 3, rng);
+      const shuffledBrands = shuffle(BRANDS, rng).slice(0, usedByCount);
+
+      const paymentToReachOptimum = +(price * Math.max(0, maxStockLevel - currentStocks)).toFixed(2);
+      const monthlyStockCost = +(price * monthlyDemand).toFixed(2);
+
+      const row: Record<string, any> = {
+        "Item Code": itemCode,
+        Description: description,
+        "Item Description": `${description} used across ${usedByCount} brand${
+          usedByCount > 1 ? "s" : ""
+        } for production and packaging operations.`,
+      };
+      BRANDS.forEach((b) => (row[b] = shuffledBrands.includes(b) ? "Yes" : "No"));
+      row["Used by # Brands"] = shuffledBrands.length;
+      row["Monthly Demand"] = monthlyDemand;
+      row["Current Stocks"] = currentStocks;
+      row["Coverage"] = coverage;
+      row["Order Status"] = orderStatus;
+      row["Criticality"] = criticality;
+      row["Minimum Stock Level"] = minStockLevel;
+      row["Maximum Stock Level"] = maxStockLevel;
+      row["Order QTY"] = orderQty;
+      row["Lead Time"] = leadTime;
+      row["Classification"] = classification;
+      row["Price"] = price;
+      row["Supplier"] = supplier;
+      row["Payment To Reach Optimum"] = paymentToReachOptimum;
+      row["Monthly Stock Cost"] = monthlyStockCost;
+
+      rows.push(row);
+    }
+  });
+
+  return rows;
+}
+
+export function generateSampleWorkbookBuffer(): Buffer {
+  const rows = generateSampleRows();
+  const ws = XLSX.utils.json_to_sheet(rows, { header: HEADERS });
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, SAMPLE_WORKSHEET_NAME);
+  const out = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+  return out as Buffer;
+}
+
+/** Writes data/sample/Master.xlsx once, so the app runs standalone with `npm run dev`. */
+export function ensureSampleWorkbook(force = false): string {
+  if (!fs.existsSync(SAMPLE_DIR)) fs.mkdirSync(SAMPLE_DIR, { recursive: true });
+  if (force || !fs.existsSync(SAMPLE_WORKBOOK_PATH)) {
+    const buf = generateSampleWorkbookBuffer();
+    fs.writeFileSync(SAMPLE_WORKBOOK_PATH, buf);
+  }
+  return SAMPLE_WORKBOOK_PATH;
+}
+##FILE-END::##
+##FILE-START::erp-inventory-dashboard/src/lib/graphClient.ts::##
+import "isomorphic-fetch";
+import { ConfidentialClientApplication } from "@azure/msal-node";
+import { Client } from "@microsoft/microsoft-graph-client";
+
+export function isGraphConfigured() {
+  return Boolean(
+    process.env.AZURE_TENANT_ID &&
+      process.env.AZURE_CLIENT_ID &&
+      process.env.AZURE_CLIENT_SECRET
+  );
+}
+
+function getMsalApp() {
+  return new ConfidentialClientApplication({
+    auth: {
+      clientId: process.env.AZURE_CLIENT_ID as string,
+      authority: `https://login.microsoftonline.com/${process.env.AZURE_TENANT_ID}`,
+      clientSecret: process.env.AZURE_CLIENT_SECRET as string,
+    },
+  });
+}
+
+async function getGraphClient() {
+  const app = getMsalApp();
+  const result = await app.acquireTokenByClientCredential({
+    scopes: [process.env.GRAPH_SCOPE || "https://graph.microsoft.com/.default"],
+  });
+  if (!result?.accessToken) throw new Error("Failed to acquire a Microsoft Graph access token.");
+  const accessToken = result.accessToken;
+  return Client.init({
+    authProvider: (done) => done(null, accessToken),
+  });
+}
+
+/**
+ * Parses a SharePoint document URL such as:
+ *   https://company.sharepoint.com/sites/Inventory/Shared%20Documents/Master.xlsx
+ * into the pieces Microsoft Graph needs to address the site and file.
+ */
+export function parseSharePointUrl(url: string) {
+  const u = new URL(url);
+  const hostname = u.hostname;
+  const decodedPath = decodeURIComponent(u.pathname);
+  const match = decodedPath.match(/^\/sites\/([^/]+)\/(.+)$/);
+  if (!match) {
+    throw new Error(
+      'Unrecognized SharePoint URL. Expected a format like https://<tenant>.sharepoint.com/sites/<site>/Shared Documents/<file>.xlsx'
+    );
+  }
+  const [, siteName, filePath] = match;
+  const drivePath = filePath.replace(/^Shared Documents\//, "");
+  return { hostname, siteName, filePath, drivePath };
+}
+
+export async function fetchWorksheetRows(
+  sharePointUrl: string,
+  worksheetName: string
+): Promise<Record<string, any>[]> {
+  const client = await getGraphClient();
+  const { hostname, siteName, drivePath } = parseSharePointUrl(sharePointUrl);
+
+  const site = await client.api(`/sites/${hostname}:/sites/${siteName}`).get();
+  const siteId = site.id;
+
+  const range = await client
+    .api(
+      `/sites/${siteId}/drive/root:/${drivePath}:/workbook/worksheets('${encodeURIComponent(
+        worksheetName
+      )}')/usedRange(valuesOnly=true)`
+    )
+    .get();
+
+  const values: any[][] = range.values || [];
+  if (values.length === 0) return [];
+  const headers = values[0].map((h: any) => String(h).trim());
+  return values.slice(1).map((row) => {
+    const obj: Record<string, any> = {};
+    headers.forEach((h, i) => (obj[h] = row[i]));
+    return obj;
+  });
+}
+
+export async function testGraphConnection(sharePointUrl: string, worksheetName: string) {
+  if (!isGraphConfigured()) {
+    return {
+      ok: false,
+      message:
+        "Azure AD credentials are not configured on the server (AZURE_TENANT_ID / AZURE_CLIENT_ID / AZURE_CLIENT_SECRET). Running on sample data instead.",
+    };
+  }
+  try {
+    const rows = await fetchWorksheetRows(sharePointUrl, worksheetName);
+    return {
+      ok: true,
+      message: `Connected successfully to SharePoint via Microsoft Graph. Found ${rows.length} row(s) in "${worksheetName}".`,
+    };
+  } catch (err: any) {
+    return { ok: false, message: err?.message || "Failed to connect via Microsoft Graph." };
+  }
+}
+##FILE-END::##
+##FILE-START::erp-inventory-dashboard/src/lib/excelSource.ts::##
+import * as XLSX from "xlsx";
+import { getSettings } from "./settingsStore";
+import { ensureSampleWorkbook } from "./sampleData";
+import { fetchWorksheetRows, isGraphConfigured } from "./graphClient";
+import { categoryFromItemCode } from "./categorize";
+import { InventoryItem } from "./types";
+import { BRANDS } from "./constants";
+
+function toBool(v: any) {
+  if (typeof v === "boolean") return v;
+  if (v === undefined || v === null) return false;
+  const s = String(v).trim().toLowerCase();
+  return s === "yes" || s === "y" || s === "true" || s === "1";
+}
+
+function toNum(v: any) {
+  if (typeof v === "number") return v;
+  const n = parseFloat(String(v ?? "").replace(/,/g, ""));
+  return isNaN(n) ? 0 : n;
+}
+
+export function rowToItem(row: Record<string, any>): InventoryItem {
+  const itemCode = String(row["Item Code"] ?? "").trim();
+  const cat = categoryFromItemCode(itemCode);
+  const brands: any = {};
+  BRANDS.forEach((b) => (brands[b] = toBool(row[b])));
+  const usedByBrands =
+    row["Used by # Brands"] !== undefined && row["Used by # Brands"] !== ""
+      ? toNum(row["Used by # Brands"])
+      : Object.values(brands).filter(Boolean).length;
+
+  return {
+    itemCode,
+    description: String(row["Description"] ?? "").trim(),
+    itemDescription: String(row["Item Description"] ?? "").trim(),
+    brands,
+    usedByBrands,
+    monthlyDemand: toNum(row["Monthly Demand"]),
+    currentStocks: toNum(row["Current Stocks"]),
+    coverage: toNum(row["Coverage"]),
+    orderStatus: (row["Order Status"] || "In Stock") as InventoryItem["orderStatus"],
+    criticality: (row["Criticality"] || "Medium") as InventoryItem["criticality"],
+    minStockLevel: toNum(row["Minimum Stock Level"]),
+    maxStockLevel: toNum(row["Maximum Stock Level"]),
+    orderQty: toNum(row["Order QTY"]),
+    leadTime: toNum(row["Lead Time"]),
+    classification: String(row["Classification"] ?? "").trim(),
+    price: toNum(row["Price"]),
+    supplier: String(row["Supplier"] ?? "").trim(),
+    paymentToReachOptimum: toNum(row["Payment To Reach Optimum"]),
+    monthlyStockCost: toNum(row["Monthly Stock Cost"]),
+    category: cat.name,
+    categoryCode: cat.code,
+    categorySlug: cat.slug,
+  };
+}
+
+let cache: { items: InventoryItem[]; meta: any; expiresAt: number } | null = null;
+
+export async function loadInventoryRaw(forceRefresh = false) {
+  if (!forceRefresh && cache && cache.expiresAt > Date.now()) {
+    return { items: cache.items, ...cache.meta };
+  }
+
+  const settings = getSettings();
+  let items: InventoryItem[] = [];
+  let source: "sample" | "live" = "sample";
+  let worksheet = settings.worksheetName;
+  let workbook = settings.sharePointUrl;
+
+  if (settings.dataSource === "live" && isGraphConfigured()) {
+    try {
+      const rows = await fetchWorksheetRows(settings.sharePointUrl, settings.worksheetName);
+      items = rows.map(rowToItem);
+      source = "live";
+    } catch (err) {
+      // fall back to sample data if the live fetch fails, so the app never goes blank
+      const filePath = ensureSampleWorkbook();
+      const wb = XLSX.readFile(filePath);
+      const sheetName = wb.SheetNames.includes(settings.worksheetName)
+        ? settings.worksheetName
+        : wb.SheetNames[0];
+      const rows = XLSX.utils.sheet_to_json<Record<string, any>>(wb.Sheets[sheetName], {
+        defval: "",
+      });
+      items = rows.map(rowToItem);
+      source = "sample";
+      worksheet = sheetName;
+      workbook = filePath;
+    }
+  } else {
+    const filePath = ensureSampleWorkbook();
+    const wb = XLSX.readFile(filePath);
+    const sheetName = wb.SheetNames.includes(settings.worksheetName)
+      ? settings.worksheetName
+      : wb.SheetNames[0];
+    const rows = XLSX.utils.sheet_to_json<Record<string, any>>(wb.Sheets[sheetName], {
+      defval: "",
+    });
+    items = rows.map(rowToItem);
+    source = "sample";
+    worksheet = sheetName;
+    workbook = filePath;
+  }
+
+  const meta = { source, worksheet, workbook, fetchedAt: new Date().toISOString() };
+  cache = { items, meta, expiresAt: Date.now() + 5000 };
+  return { items, ...meta };
+}
+
+export function invalidateInventoryCache() {
+  cache = null;
+}
+##FILE-END::##
+##FILE-START::erp-inventory-dashboard/src/lib/analytics.ts::##
+import { EnrichedInventoryItem, InventoryItem, AlertItem, PurchaseRecommendation } from "./types";
+
+function hashCode(str: string) {
+  let h = 0;
+  for (let i = 0; i < str.length; i++) {
+    h = (h << 5) - h + str.charCodeAt(i);
+    h |= 0;
+  }
+  return Math.abs(h);
+}
+
+export function enrichItems(items: InventoryItem[]): EnrichedInventoryItem[] {
+  const withValue = items.map((it) => ({
+    ...it,
+    inventoryValue: +(it.currentStocks * it.price).toFixed(2),
+  }));
+
+  // ABC analysis: rank by annualized consumption value, Pareto cut at 80% / 95%
+  const annualValue = (it: InventoryItem) => it.price * it.monthlyDemand * 12;
+  const totalAnnualValue = withValue.reduce((s, it) => s + annualValue(it), 0) || 1;
+  const sorted = [...withValue].sort((a, b) => annualValue(b) - annualValue(a));
+  let cumulative = 0;
+  const abcByCode = new Map<string, "A" | "B" | "C">();
+  sorted.forEach((it) => {
+    cumulative += annualValue(it);
+    const pct = cumulative / totalAnnualValue;
+    abcByCode.set(it.itemCode, pct <= 0.8 ? "A" : pct <= 0.95 ? "B" : "C");
+  });
+
+  return withValue.map((it) => {
+    const cv = 0.05 + (hashCode(it.itemCode) % 61) / 100; // 0.05 - 0.65
+    const xyzClass = cv < 0.2 ? "X" : cv < 0.4 ? "Y" : "Z";
+
+    const fsnClass: EnrichedInventoryItem["fsnClass"] =
+      it.monthlyDemand <= 0
+        ? "Non Moving"
+        : it.coverage <= 30
+        ? "Fast Moving"
+        : it.coverage <= 90
+        ? "Slow Moving"
+        : "Non Moving";
+
+    const daysWithoutUsage = hashCode(it.itemCode + "d") % 220;
+    const isDeadStock =
+      it.monthlyDemand <= 0 || (daysWithoutUsage > 120 && it.coverage > 100);
+
+    return {
+      ...it,
+      abcClass: abcByCode.get(it.itemCode) || "C",
+      xyzClass,
+      fsnClass,
+      isDeadStock,
+      daysWithoutUsage,
+    };
+  });
+}
+
+export function computeKPIs(items: EnrichedInventoryItem[]) {
+  const totalItems = items.length;
+  const inventoryValue = items.reduce((s, i) => s + i.inventoryValue, 0);
+  const totalMonthlyStockCost = items.reduce((s, i) => s + i.monthlyStockCost, 0);
+  const totalMonthlyDemand = items.reduce((s, i) => s + i.monthlyDemand, 0);
+  const avgCoverage = totalItems ? items.reduce((s, i) => s + i.coverage, 0) / totalItems : 0;
+  const avgLeadTime = totalItems ? items.reduce((s, i) => s + i.leadTime, 0) / totalItems : 0;
+  const criticalItems = items.filter((i) => i.orderStatus === "Critical").length;
+  const itemsToOrder = items.filter((i) => i.orderStatus === "Order Now" || i.orderStatus === "Critical").length;
+  const healthyItems = items.filter((i) => i.orderStatus === "In Stock").length;
+  const suppliers = new Set(items.map((i) => i.supplier).filter(Boolean)).size;
+  const paymentRequired = items.reduce((s, i) => s + (i.paymentToReachOptimum || 0), 0);
+  const categories = new Set(items.map((i) => i.category)).size;
+
+  return {
+    totalItems,
+    inventoryValue,
+    totalMonthlyStockCost,
+    totalMonthlyDemand,
+    avgCoverage,
+    avgLeadTime,
+    criticalItems,
+    itemsToOrder,
+    healthyItems,
+    suppliers,
+    paymentRequired,
+    categories,
+  };
+}
+
+export function computeHealthScore(items: EnrichedInventoryItem[]) {
+  const total = items.length || 1;
+  const healthyRatio = items.filter((i) => i.orderStatus === "In Stock").length / total;
+  const criticalRatio = items.filter((i) => i.orderStatus === "Critical").length / total;
+  const orderNowRatio = items.filter((i) => i.orderStatus === "Order Now").length / total;
+  const overStockRatio = items.filter((i) => i.orderStatus === "Over Stock").length / total;
+  const missingDataRatio =
+    items.filter((i) => !i.supplier || !i.price || i.price <= 0).length / total;
+
+  const score =
+    30 * healthyRatio +
+    25 * (1 - criticalRatio) +
+    15 * (1 - orderNowRatio) +
+    15 * (1 - missingDataRatio) +
+    15 * (1 - overStockRatio);
+
+  return Math.max(0, Math.min(100, Math.round(score)));
+}
+
+export function generateAlerts(items: EnrichedInventoryItem[]): AlertItem[] {
+  const alerts: AlertItem[] = [];
+  const now = new Date().toISOString();
+  let id = 0;
+
+  items.forEach((it) => {
+    if (it.currentStocks <= 0) {
+      alerts.push({
+        id: String(id++),
+        type: "Out of Stock",
+        severity: "critical",
+        itemCode: it.itemCode,
+        description: it.description,
+        message: `${it.itemCode} - ${it.description} is out of stock.`,
+        createdAt: now,
+      });
+    } else if (it.orderStatus === "Critical") {
+      alerts.push({
+        id: String(id++),
+        type: "Critical Stock",
+        severity: "critical",
+        itemCode: it.itemCode,
+        description: it.description,
+        message: `${it.itemCode} - ${it.description} is at critical stock level. Order immediately.`,
+        createdAt: now,
+      });
+    } else if (it.orderStatus === "Order Now") {
+      alerts.push({
+        id: String(id++),
+        type: "Order Required",
+        severity: "warning",
+        itemCode: it.itemCode,
+        description: it.description,
+        message: `${it.itemCode} - ${it.description} should be reordered now (coverage ${it.coverage.toFixed(
+          0
+        )} days).`,
+        createdAt: now,
+      });
+    } else if (it.orderStatus === "Over Stock") {
+      alerts.push({
+        id: String(id++),
+        type: "Over Stock",
+        severity: "info",
+        itemCode: it.itemCode,
+        description: it.description,
+        message: `${it.itemCode} - ${it.description} is over stocked (coverage ${it.coverage.toFixed(0)} days).`,
+        createdAt: now,
+      });
+    }
+
+    if (it.coverage > 0 && it.coverage < 14 && it.orderStatus !== "Critical") {
+      alerts.push({
+        id: String(id++),
+        type: "Coverage Below Target",
+        severity: "warning",
+        itemCode: it.itemCode,
+        description: it.description,
+        message: `${it.itemCode} coverage (${it.coverage.toFixed(0)}d) is below the 14-day target.`,
+        createdAt: now,
+      });
+    }
+
+    if (!it.supplier) {
+      alerts.push({
+        id: String(id++),
+        type: "Missing Supplier",
+        severity: "warning",
+        itemCode: it.itemCode,
+        description: it.description,
+        message: `${it.itemCode} - ${it.description} has no supplier assigned.`,
+        createdAt: now,
+      });
+    }
+
+    if (!it.price || it.price <= 0) {
+      alerts.push({
+        id: String(id++),
+        type: "Missing Price",
+        severity: "warning",
+        itemCode: it.itemCode,
+        description: it.description,
+        message: `${it.itemCode} - ${it.description} has no unit price.`,
+        createdAt: now,
+      });
+    }
+
+    if (it.leadTime > 60) {
+      alerts.push({
+        id: String(id++),
+        type: "Long Lead Time",
+        severity: "info",
+        itemCode: it.itemCode,
+        description: it.description,
+        message: `${it.itemCode} has a long supplier lead time of ${it.leadTime} days.`,
+        createdAt: now,
+      });
+    }
+  });
+
+  const weight: Record<string, number> = { critical: 0, warning: 1, info: 2 };
+  return alerts.sort((a, b) => weight[a.severity] - weight[b.severity]);
+}
+
+export function generatePurchaseRecommendations(
+  items: EnrichedInventoryItem[]
+): PurchaseRecommendation[] {
+  const today = new Date();
+  const addDays = (d: Date, days: number) => {
+    const nd = new Date(d);
+    nd.setDate(nd.getDate() + Math.round(days));
+    return nd.toISOString().slice(0, 10);
+  };
+
+  return items
+    .filter(
+      (it) =>
+        it.orderStatus === "Critical" ||
+        it.orderStatus === "Order Now" ||
+        it.coverage < it.leadTime + 7
+    )
+    .map((it) => {
+      const recommendedOrderQty = Math.max(
+        it.maxStockLevel - it.currentStocks,
+        it.orderQty || Math.ceil(it.monthlyDemand * 1.5),
+        0
+      );
+      const priority: PurchaseRecommendation["priority"] =
+        it.currentStocks <= 0 || it.coverage < it.leadTime || it.orderStatus === "Critical"
+          ? "Urgent"
+          : it.criticality === "High"
+          ? "High"
+          : it.orderStatus === "Order Now"
+          ? "Medium"
+          : "Low";
+
+      return {
+        itemCode: it.itemCode,
+        description: it.description,
+        supplier: it.supplier,
+        category: it.category,
+        criticality: it.criticality,
+        currentStocks: it.currentStocks,
+        monthlyDemand: it.monthlyDemand,
+        coverage: it.coverage,
+        leadTime: it.leadTime,
+        recommendedOrderQty,
+        recommendedOrderDate: today.toISOString().slice(0, 10),
+        estimatedStockOutDate: addDays(today, it.coverage),
+        estimatedArrivalDate: addDays(today, it.leadTime),
+        estimatedPayment: +(recommendedOrderQty * it.price).toFixed(2),
+        priority,
+      };
+    })
+    .sort((a, b) => {
+      const order = { Urgent: 0, High: 1, Medium: 2, Low: 3 };
+      return order[a.priority] - order[b.priority] || a.coverage - b.coverage;
+    });
+}
+
+export function deadStockList(items: EnrichedInventoryItem[]) {
+  return items
+    .filter((i) => i.isDeadStock)
+    .map((i) => ({
+      itemCode: i.itemCode,
+      description: i.description,
+      category: i.category,
+      supplier: i.supplier,
+      daysWithoutUsage: i.daysWithoutUsage,
+      inventoryValue: i.inventoryValue,
+      recommendedAction:
+        i.daysWithoutUsage > 150
+          ? "Liquidate / write off"
+          : "Review demand, consider discount or reallocation",
+    }))
+    .sort((a, b) => b.daysWithoutUsage - a.daysWithoutUsage);
+}
+
+export function generateAIInsights(items: EnrichedInventoryItem[]): string[] {
+  const kpis = computeKPIs(items);
+  const insights: string[] = [];
+
+  const byCategory = new Map<string, number>();
+  items.forEach((i) => byCategory.set(i.category, (byCategory.get(i.category) || 0) + i.inventoryValue));
+  const topCategory = [...byCategory.entries()].sort((a, b) => b[1] - a[1])[0];
+  if (topCategory && kpis.inventoryValue > 0) {
+    const pct = Math.round((topCategory[1] / kpis.inventoryValue) * 100);
+    insights.push(`${topCategory[0]} represents ${pct}% of total inventory value.`);
+  }
+
+  const bySupplierLead = new Map<string, number[]>();
+  items.forEach((i) => {
+    if (!i.supplier) return;
+    const arr = bySupplierLead.get(i.supplier) || [];
+    arr.push(i.leadTime);
+    bySupplierLead.set(i.supplier, arr);
+  });
+  let slowestSupplier = "";
+  let slowestAvg = 0;
+  bySupplierLead.forEach((arr, supplier) => {
+    const avg = arr.reduce((s, v) => s + v, 0) / arr.length;
+    if (avg > slowestAvg) {
+      slowestAvg = avg;
+      slowestSupplier = supplier;
+    }
+  });
+  if (slowestSupplier) {
+    insights.push(`${slowestSupplier} has the highest average lead time (${slowestAvg.toFixed(0)} days).`);
+  }
+
+  const lowestCoverageCategory = [...byCategory.keys()]
+    .map((cat) => {
+      const catItems = items.filter((i) => i.category === cat);
+      const avg = catItems.reduce((s, i) => s + i.coverage, 0) / (catItems.length || 1);
+      return { cat, avg };
+    })
+    .sort((a, b) => a.avg - b.avg)[0];
+  if (lowestCoverageCategory) {
+    insights.push(
+      `${lowestCoverageCategory.cat} has the lowest average coverage (${lowestCoverageCategory.avg.toFixed(
+        0
+      )} days) across the portfolio.`
+    );
+  }
+
+  if (kpis.criticalItems > 0) {
+    insights.push(
+      `${kpis.criticalItems} item(s) are at critical stock and require immediate purchasing action.`
+    );
+  }
+
+  const overStockCount = items.filter((i) => i.orderStatus === "Over Stock").length;
+  if (overStockCount > 0) {
+    insights.push(`${overStockCount} item(s) are over-stocked, tying up working capital unnecessarily.`);
+  }
+
+  return insights;
+}
+##FILE-END::##

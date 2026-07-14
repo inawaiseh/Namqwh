@@ -1,0 +1,375 @@
+##FILE-START::erp-inventory-dashboard/src/lib/poStore.ts::##
+import fs from "fs";
+import path from "path";
+import { PurchaseOrder } from "./types";
+
+const DATA_DIR = path.join(process.cwd(), "data");
+const PO_PATH = path.join(DATA_DIR, "purchase-orders.json");
+
+function ensureFile() {
+  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+  if (!fs.existsSync(PO_PATH)) fs.writeFileSync(PO_PATH, "[]");
+}
+
+export function getPurchaseOrders(): PurchaseOrder[] {
+  ensureFile();
+  const all: PurchaseOrder[] = JSON.parse(fs.readFileSync(PO_PATH, "utf8"));
+  return all.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+}
+
+export function savePurchaseOrder(po: PurchaseOrder) {
+  ensureFile();
+  const all: PurchaseOrder[] = JSON.parse(fs.readFileSync(PO_PATH, "utf8"));
+  all.push(po);
+  fs.writeFileSync(PO_PATH, JSON.stringify(all, null, 2));
+  return po;
+}
+
+export function nextPoNumber(): string {
+  const all = getPurchaseOrders();
+  const year = new Date().getFullYear();
+  const seq = all.filter((p) => p.poNumber.includes(String(year))).length + 1;
+  return `PO-${year}-${String(seq).padStart(4, "0")}`;
+}
+##FILE-END::##
+##FILE-START::erp-inventory-dashboard/src/app/api/inventory/route.ts::##
+import { NextRequest, NextResponse } from "next/server";
+import { loadInventoryRaw, invalidateInventoryCache } from "@/lib/excelSource";
+import { enrichItems } from "@/lib/analytics";
+
+export const dynamic = "force-dynamic";
+
+export async function GET(req: NextRequest) {
+  const force = req.nextUrl.searchParams.get("refresh") === "1";
+  if (force) invalidateInventoryCache();
+  const { items, source, worksheet, workbook, fetchedAt } = await loadInventoryRaw(force);
+  const enriched = enrichItems(items);
+  return NextResponse.json({ items: enriched, source, worksheet, workbook, fetchedAt });
+}
+##FILE-END::##
+##FILE-START::erp-inventory-dashboard/src/app/api/settings/route.ts::##
+import { NextRequest, NextResponse } from "next/server";
+import { getSettings, saveSettings } from "@/lib/settingsStore";
+import { invalidateInventoryCache } from "@/lib/excelSource";
+
+export const dynamic = "force-dynamic";
+
+export async function GET() {
+  return NextResponse.json(getSettings());
+}
+
+export async function POST(req: NextRequest) {
+  const body = await req.json();
+  const updated = saveSettings(body);
+  invalidateInventoryCache();
+  return NextResponse.json(updated);
+}
+##FILE-END::##
+##FILE-START::erp-inventory-dashboard/src/app/api/graph/test-connection/route.ts::##
+import { NextRequest, NextResponse } from "next/server";
+import { testGraphConnection } from "@/lib/graphClient";
+
+export async function POST(req: NextRequest) {
+  const body = await req.json();
+  const result = await testGraphConnection(body.sharePointUrl, body.worksheetName);
+  return NextResponse.json(result);
+}
+##FILE-END::##
+##FILE-START::erp-inventory-dashboard/src/app/api/analytics/route.ts::##
+import { NextResponse } from "next/server";
+import { loadInventoryRaw } from "@/lib/excelSource";
+import {
+  enrichItems,
+  computeKPIs,
+  computeHealthScore,
+  deadStockList,
+  generateAIInsights,
+} from "@/lib/analytics";
+
+export const dynamic = "force-dynamic";
+
+export async function GET() {
+  const { items } = await loadInventoryRaw();
+  const enriched = enrichItems(items);
+  const kpis = computeKPIs(enriched);
+  const healthScore = computeHealthScore(enriched);
+  const insights = generateAIInsights(enriched);
+  const deadStock = deadStockList(enriched);
+
+  const byCategory: Record<string, { value: number; count: number; demand: number; cost: number }> = {};
+  enriched.forEach((i) => {
+    byCategory[i.category] ??= { value: 0, count: 0, demand: 0, cost: 0 };
+    byCategory[i.category].value += i.inventoryValue;
+    byCategory[i.category].count += 1;
+    byCategory[i.category].demand += i.monthlyDemand;
+    byCategory[i.category].cost += i.monthlyStockCost;
+  });
+
+  const bySupplier: Record<string, { value: number; count: number }> = {};
+  enriched.forEach((i) => {
+    if (!i.supplier) return;
+    bySupplier[i.supplier] ??= { value: 0, count: 0 };
+    bySupplier[i.supplier].value += i.inventoryValue;
+    bySupplier[i.supplier].count += 1;
+  });
+
+  const coverageBuckets = { "0-7": 0, "8-14": 0, "15-30": 0, "31-60": 0, "61-90": 0, "90+": 0 };
+  enriched.forEach((i) => {
+    const c = i.coverage;
+    if (c <= 7) coverageBuckets["0-7"]++;
+    else if (c <= 14) coverageBuckets["8-14"]++;
+    else if (c <= 30) coverageBuckets["15-30"]++;
+    else if (c <= 60) coverageBuckets["31-60"]++;
+    else if (c <= 90) coverageBuckets["61-90"]++;
+    else coverageBuckets["90+"]++;
+  });
+
+  const leadTimeBuckets = { "0-15": 0, "16-30": 0, "31-60": 0, "61-90": 0, "90+": 0 };
+  enriched.forEach((i) => {
+    const l = i.leadTime;
+    if (l <= 15) leadTimeBuckets["0-15"]++;
+    else if (l <= 30) leadTimeBuckets["16-30"]++;
+    else if (l <= 60) leadTimeBuckets["31-60"]++;
+    else if (l <= 90) leadTimeBuckets["61-90"]++;
+    else leadTimeBuckets["90+"]++;
+  });
+
+  const criticalityBuckets = { High: 0, Medium: 0, Low: 0 };
+  enriched.forEach((i) => (criticalityBuckets[i.criticality] += 1));
+
+  const abcBuckets = { A: 0, B: 0, C: 0 };
+  const xyzBuckets = { X: 0, Y: 0, Z: 0 };
+  const fsnBuckets = { "Fast Moving": 0, "Slow Moving": 0, "Non Moving": 0 };
+  enriched.forEach((i) => {
+    abcBuckets[i.abcClass] += 1;
+    xyzBuckets[i.xyzClass] += 1;
+    fsnBuckets[i.fsnClass] += 1;
+  });
+
+  const topValueItems = [...enriched].sort((a, b) => b.inventoryValue - a.inventoryValue).slice(0, 20);
+  const topLowCoverage = [...enriched]
+    .filter((i) => i.monthlyDemand > 0)
+    .sort((a, b) => a.coverage - b.coverage)
+    .slice(0, 20);
+  const topDemand = [...enriched].sort((a, b) => b.monthlyDemand - a.monthlyDemand).slice(0, 20);
+
+  return NextResponse.json({
+    kpis,
+    healthScore,
+    insights,
+    deadStock,
+    byCategory,
+    bySupplier,
+    coverageBuckets,
+    leadTimeBuckets,
+    criticalityBuckets,
+    abcBuckets,
+    xyzBuckets,
+    fsnBuckets,
+    topValueItems,
+    topLowCoverage,
+    topDemand,
+  });
+}
+##FILE-END::##
+##FILE-START::erp-inventory-dashboard/src/app/api/alerts/route.ts::##
+import { NextResponse } from "next/server";
+import { loadInventoryRaw } from "@/lib/excelSource";
+import { enrichItems, generateAlerts } from "@/lib/analytics";
+
+export const dynamic = "force-dynamic";
+
+export async function GET() {
+  const { items } = await loadInventoryRaw();
+  const enriched = enrichItems(items);
+  const alerts = generateAlerts(enriched);
+  return NextResponse.json({ alerts });
+}
+##FILE-END::##
+##FILE-START::erp-inventory-dashboard/src/app/api/purchase-recommendations/route.ts::##
+import { NextResponse } from "next/server";
+import { loadInventoryRaw } from "@/lib/excelSource";
+import { enrichItems, generatePurchaseRecommendations } from "@/lib/analytics";
+
+export const dynamic = "force-dynamic";
+
+export async function GET() {
+  const { items } = await loadInventoryRaw();
+  const enriched = enrichItems(items);
+  const recommendations = generatePurchaseRecommendations(enriched);
+  return NextResponse.json({ recommendations });
+}
+##FILE-END::##
+##FILE-START::erp-inventory-dashboard/src/app/api/purchase-orders/route.ts::##
+import { NextRequest, NextResponse } from "next/server";
+import { loadInventoryRaw } from "@/lib/excelSource";
+import { enrichItems, generatePurchaseRecommendations } from "@/lib/analytics";
+import { getPurchaseOrders, savePurchaseOrder, nextPoNumber } from "@/lib/poStore";
+import { PurchaseOrder, PurchaseOrderLine } from "@/lib/types";
+
+export const dynamic = "force-dynamic";
+
+export async function GET() {
+  return NextResponse.json({ purchaseOrders: getPurchaseOrders() });
+}
+
+export async function POST(req: NextRequest) {
+  const body = await req.json();
+  const itemCodes: string[] = body.itemCodes || [];
+
+  const { items } = await loadInventoryRaw();
+  const enriched = enrichItems(items);
+  const recs = generatePurchaseRecommendations(enriched);
+
+  const selected = recs.filter((r) => itemCodes.includes(r.itemCode));
+  if (selected.length === 0) {
+    return NextResponse.json({ error: "No matching recommended items found." }, { status: 400 });
+  }
+
+  const supplier = body.supplier || selected[0].supplier || "Unassigned Supplier";
+  const lines: PurchaseOrderLine[] = selected.map((r) => {
+    const item = enriched.find((i) => i.itemCode === r.itemCode)!;
+    return {
+      itemCode: r.itemCode,
+      description: r.description,
+      qty: r.recommendedOrderQty,
+      unitPrice: item.price,
+      totalCost: +(r.recommendedOrderQty * item.price).toFixed(2),
+    };
+  });
+
+  const maxLeadTime = Math.max(...selected.map((r) => r.leadTime));
+  const createdAt = new Date().toISOString();
+  const expectedDeliveryDate = new Date();
+  expectedDeliveryDate.setDate(expectedDeliveryDate.getDate() + maxLeadTime);
+
+  const po: PurchaseOrder = {
+    poNumber: nextPoNumber(),
+    supplier,
+    createdAt,
+    expectedDeliveryDate: expectedDeliveryDate.toISOString().slice(0, 10),
+    leadTime: maxLeadTime,
+    status: "Draft",
+    lines,
+    totalCost: +lines.reduce((s, l) => s + l.totalCost, 0).toFixed(2),
+  };
+
+  savePurchaseOrder(po);
+  return NextResponse.json({ purchaseOrder: po });
+}
+##FILE-END::##
+##FILE-START::erp-inventory-dashboard/src/app/api/suppliers/route.ts::##
+import { NextResponse } from "next/server";
+import { loadInventoryRaw } from "@/lib/excelSource";
+import { enrichItems } from "@/lib/analytics";
+
+export const dynamic = "force-dynamic";
+
+export async function GET() {
+  const { items } = await loadInventoryRaw();
+  const enriched = enrichItems(items);
+
+  const map = new Map<
+    string,
+    {
+      supplier: string;
+      itemsCount: number;
+      inventoryValue: number;
+      monthlyCost: number;
+      leadTimes: number[];
+      criticalItems: number;
+      paymentRequired: number;
+    }
+  >();
+
+  enriched.forEach((i) => {
+    const key = i.supplier || "Unassigned";
+    if (!map.has(key)) {
+      map.set(key, {
+        supplier: key,
+        itemsCount: 0,
+        inventoryValue: 0,
+        monthlyCost: 0,
+        leadTimes: [],
+        criticalItems: 0,
+        paymentRequired: 0,
+      });
+    }
+    const s = map.get(key)!;
+    s.itemsCount += 1;
+    s.inventoryValue += i.inventoryValue;
+    s.monthlyCost += i.monthlyStockCost;
+    s.leadTimes.push(i.leadTime);
+    if (i.orderStatus === "Critical") s.criticalItems += 1;
+    s.paymentRequired += i.paymentToReachOptimum || 0;
+  });
+
+  const suppliers = [...map.values()]
+    .map((s) => ({
+      supplier: s.supplier,
+      itemsCount: s.itemsCount,
+      inventoryValue: +s.inventoryValue.toFixed(2),
+      monthlyCost: +s.monthlyCost.toFixed(2),
+      avgLeadTime: +(s.leadTimes.reduce((a, b) => a + b, 0) / (s.leadTimes.length || 1)).toFixed(1),
+      criticalItems: s.criticalItems,
+      paymentRequired: +s.paymentRequired.toFixed(2),
+      score: Math.max(
+        0,
+        Math.round(
+          100 -
+            (s.leadTimes.reduce((a, b) => a + b, 0) / (s.leadTimes.length || 1)) * 0.5 -
+            (s.criticalItems / s.itemsCount) * 40
+        )
+      ),
+    }))
+    .sort((a, b) => b.inventoryValue - a.inventoryValue)
+    .map((s, idx) => ({ ...s, rank: idx + 1 }));
+
+  return NextResponse.json({ suppliers });
+}
+##FILE-END::##
+##FILE-START::erp-inventory-dashboard/src/app/api/brands/route.ts::##
+import { NextResponse } from "next/server";
+import { loadInventoryRaw } from "@/lib/excelSource";
+import { enrichItems } from "@/lib/analytics";
+import { BRANDS } from "@/lib/constants";
+
+export const dynamic = "force-dynamic";
+
+export async function GET() {
+  const { items } = await loadInventoryRaw();
+  const enriched = enrichItems(items);
+
+  const brands = BRANDS.map((brand) => {
+    const brandItems = enriched.filter((i) => i.brands[brand]);
+    const itemsUsed = brandItems.length;
+    const inventoryValue = brandItems.reduce((s, i) => s + i.inventoryValue, 0);
+    const monthlyDemand = brandItems.reduce((s, i) => s + i.monthlyDemand, 0);
+    const avgCoverage =
+      brandItems.reduce((s, i) => s + i.coverage, 0) / (brandItems.length || 1);
+    const criticalItems = brandItems.filter((i) => i.orderStatus === "Critical").length;
+
+    return {
+      brand,
+      itemsUsed,
+      inventoryValue: +inventoryValue.toFixed(2),
+      monthlyDemand,
+      avgCoverage: +avgCoverage.toFixed(1),
+      criticalItems,
+    };
+  });
+
+  return NextResponse.json({ brands });
+}
+##FILE-END::##
+##FILE-START::erp-inventory-dashboard/src/app/api/movement-history/route.ts::##
+import { NextRequest, NextResponse } from "next/server";
+import { getMovementHistory } from "@/lib/movementHistory";
+
+export const dynamic = "force-dynamic";
+
+export async function GET(req: NextRequest) {
+  const itemCode = req.nextUrl.searchParams.get("itemCode") || undefined;
+  return NextResponse.json({ history: getMovementHistory(itemCode) });
+}
+##FILE-END::##

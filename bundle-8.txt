@@ -1,0 +1,337 @@
+##FILE-START::erp-inventory-dashboard/src/app/inventory/[itemCode]/page.tsx::##
+"use client";
+
+import Link from "next/link";
+import { ArrowLeft } from "lucide-react";
+import { useFetch } from "@/lib/useFetch";
+import { StatusBadge, CriticalityBadge } from "@/components/ui/StatusBadge";
+import { formatCurrency, formatNumber } from "@/lib/format";
+import { BRANDS } from "@/lib/constants";
+
+function DetailCard({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="bg-erp-card dark:bg-slate-800 rounded-xl2 border border-erp-border dark:border-slate-700 shadow-card p-4 space-y-2">
+      <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-1">{title}</h3>
+      {children}
+    </div>
+  );
+}
+
+function Row({ label, value }: { label: string; value: any }) {
+  return (
+    <div className="flex items-center justify-between text-sm">
+      <span className="text-erp-muted">{label}</span>
+      <span className="font-medium text-slate-800 dark:text-slate-100">{value}</span>
+    </div>
+  );
+}
+
+export default function ProductDetailPage({ params }: { params: { itemCode: string } }) {
+  const { data } = useFetch<{ items: any[] }>("/api/inventory");
+  const item = data?.items?.find((i: any) => i.itemCode === params.itemCode);
+
+  if (data && !item) {
+    return (
+      <div className="space-y-4">
+        <Link href="/inventory" className="inline-flex items-center gap-1 text-sm text-erp-accent">
+          <ArrowLeft size={14} /> Back to Inventory
+        </Link>
+        <p className="text-sm text-erp-muted">Item &quot;{params.itemCode}&quot; was not found.</p>
+      </div>
+    );
+  }
+
+  if (!item) return <p className="text-sm text-erp-muted">Loading item...</p>;
+
+  const stockPct =
+    item.maxStockLevel > 0 ? Math.min(100, Math.round((item.currentStocks / item.maxStockLevel) * 100)) : 0;
+
+  return (
+    <div className="space-y-6">
+      <Link href="/inventory" className="inline-flex items-center gap-1 text-sm text-erp-accent">
+        <ArrowLeft size={14} /> Back to Inventory
+      </Link>
+
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-bold text-slate-800 dark:text-white">{item.description}</h1>
+          <p className="text-sm text-erp-muted">
+            {item.itemCode} &middot; {item.category}
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <StatusBadge status={item.orderStatus} />
+          <CriticalityBadge level={item.criticality} />
+        </div>
+      </div>
+
+      <p className="text-sm text-slate-600 dark:text-slate-300 bg-erp-card dark:bg-slate-800 border border-erp-border dark:border-slate-700 rounded-xl2 p-4">
+        {item.itemDescription}
+      </p>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <DetailCard title="Stock & Coverage">
+          <Row label="Current Stock" value={formatNumber(item.currentStocks)} />
+          <Row label="Minimum Stock" value={formatNumber(item.minStockLevel)} />
+          <Row label="Maximum Stock" value={formatNumber(item.maxStockLevel)} />
+          <div className="mt-2">
+            <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
+              <div className="h-full bg-erp-accent" style={{ width: `${stockPct}%` }} />
+            </div>
+            <p className="text-[11px] text-erp-muted mt-1">{stockPct}% of maximum stock level</p>
+          </div>
+          <Row label="Monthly Demand" value={formatNumber(item.monthlyDemand)} />
+          <Row label="Coverage" value={`${formatNumber(item.coverage)} days`} />
+          <Row label="Order QTY" value={formatNumber(item.orderQty)} />
+          <Row label="Lead Time" value={`${formatNumber(item.leadTime)} days`} />
+        </DetailCard>
+
+        <DetailCard title="Financials">
+          <Row label="Unit Price" value={formatCurrency(item.price)} />
+          <Row label="Inventory Value" value={formatCurrency(item.inventoryValue)} />
+          <Row label="Monthly Stock Cost" value={formatCurrency(item.monthlyStockCost)} />
+          <Row label="Payment Required" value={formatCurrency(item.paymentToReachOptimum)} />
+          <Row label="Classification" value={item.classification} />
+          <Row label="ABC Class" value={item.abcClass} />
+          <Row label="XYZ Class" value={item.xyzClass} />
+          <Row label="FSN Class" value={item.fsnClass} />
+        </DetailCard>
+
+        <DetailCard title="Supplier & Brands">
+          <Row label="Supplier" value={item.supplier || "Not assigned"} />
+          <Row label="Used by # Brands" value={formatNumber(item.usedByBrands)} />
+          <div className="flex flex-wrap gap-1.5 mt-2">
+            {BRANDS.filter((b) => item.brands[b]).map((b) => (
+              <span key={b} className="text-[11px] font-medium bg-erp-navy/10 text-erp-navy px-2 py-1 rounded-full">
+                {b}
+              </span>
+            ))}
+            {BRANDS.filter((b) => item.brands[b]).length === 0 && (
+              <span className="text-xs text-erp-muted">No brands assigned</span>
+            )}
+          </div>
+        </DetailCard>
+      </div>
+    </div>
+  );
+}
+##FILE-END::##
+##FILE-START::erp-inventory-dashboard/src/app/categories/[category]/page.tsx::##
+"use client";
+
+import { useFetch } from "@/lib/useFetch";
+import { CATEGORY_BY_SLUG } from "@/lib/constants";
+import { KpiCard } from "@/components/ui/KpiCard";
+import { ChartCard } from "@/components/charts/ChartCard";
+import { InventoryGrid } from "@/components/inventory/InventoryGrid";
+import { formatCurrency, formatNumber } from "@/lib/format";
+import { Package, DollarSign, TrendingUp, Boxes, AlertTriangle, ShoppingCart } from "lucide-react";
+
+export default function CategoryPage({ params }: { params: { category: string } }) {
+  const meta = CATEGORY_BY_SLUG[params.category];
+  const { data } = useFetch<{ items: any[] }>("/api/inventory");
+
+  if (!meta) {
+    return <p className="text-sm text-erp-muted">Unknown category.</p>;
+  }
+
+  const items = (data?.items || []).filter((i: any) => i.categorySlug === params.category);
+
+  const itemsCount = items.length;
+  const inventoryValue = items.reduce((s: number, i: any) => s + i.inventoryValue, 0);
+  const monthlyDemand = items.reduce((s: number, i: any) => s + i.monthlyDemand, 0);
+  const currentStock = items.reduce((s: number, i: any) => s + i.currentStocks, 0);
+  const avgCoverage = items.length ? items.reduce((s: number, i: any) => s + i.coverage, 0) / items.length : 0;
+  const criticalItems = items.filter((i: any) => i.orderStatus === "Critical").length;
+  const itemsToOrder = items.filter((i: any) => i.orderStatus === "Order Now" || i.orderStatus === "Critical").length;
+
+  const supplierMap: Record<string, number> = {};
+  items.forEach((i: any) => {
+    if (!i.supplier) return;
+    supplierMap[i.supplier] = (supplierMap[i.supplier] || 0) + i.inventoryValue;
+  });
+
+  const supplierOption = {
+    tooltip: { trigger: "item" },
+    legend: { bottom: 0, textStyle: { fontSize: 10 } },
+    series: [
+      {
+        type: "pie",
+        radius: ["40%", "70%"],
+        data: Object.entries(supplierMap).map(([name, value]) => ({ name, value: +value.toFixed(0) })),
+      },
+    ],
+  };
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-xl font-bold text-slate-800 dark:text-white">{meta.name}</h1>
+        <p className="text-sm text-erp-muted">Category-level KPIs, supplier mix, and item master.</p>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">
+        <KpiCard title="Items Count" value={formatNumber(itemsCount)} icon={Package} tone="navy" />
+        <KpiCard title="Inventory Value" value={formatCurrency(inventoryValue)} icon={DollarSign} tone="success" />
+        <KpiCard title="Monthly Demand" value={formatNumber(monthlyDemand)} icon={TrendingUp} tone="accent" />
+        <KpiCard title="Current Stock" value={formatNumber(currentStock)} icon={Boxes} tone="muted" />
+        <KpiCard title="Avg Coverage" value={`${formatNumber(avgCoverage)} d`} icon={Boxes} tone="muted" />
+        <KpiCard title="Critical Items" value={formatNumber(criticalItems)} icon={AlertTriangle} tone="critical" />
+        <KpiCard title="Items To Order" value={formatNumber(itemsToOrder)} icon={ShoppingCart} tone="warning" />
+      </div>
+
+      <ChartCard title="Inventory Value by Supplier" option={supplierOption} />
+
+      <InventoryGrid items={items} />
+    </div>
+  );
+}
+##FILE-END::##
+##FILE-START::erp-inventory-dashboard/src/app/suppliers/page.tsx::##
+"use client";
+
+import { useFetch } from "@/lib/useFetch";
+import { formatCurrency, formatNumber } from "@/lib/format";
+import { KpiCard } from "@/components/ui/KpiCard";
+import { Truck, DollarSign, Package, AlertTriangle } from "lucide-react";
+
+export default function SuppliersPage() {
+  const { data } = useFetch<{ suppliers: any[] }>("/api/suppliers");
+  const suppliers = data?.suppliers || [];
+
+  const totalValue = suppliers.reduce((s, x) => s + x.inventoryValue, 0);
+  const totalCritical = suppliers.reduce((s, x) => s + x.criticalItems, 0);
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-xl font-bold text-slate-800 dark:text-white">Supplier Dashboard</h1>
+        <p className="text-sm text-erp-muted">Ranking, performance, and exposure by supplier.</p>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <KpiCard title="Suppliers" value={formatNumber(suppliers.length)} icon={Truck} tone="navy" />
+        <KpiCard title="Total Inventory Value" value={formatCurrency(totalValue)} icon={DollarSign} tone="success" />
+        <KpiCard title="Critical Items" value={formatNumber(totalCritical)} icon={AlertTriangle} tone="critical" />
+        <KpiCard title="Top Supplier" value={suppliers[0]?.supplier ?? "-"} icon={Package} tone="accent" />
+      </div>
+
+      <div className="bg-erp-card dark:bg-slate-800 rounded-xl2 border border-erp-border dark:border-slate-700 shadow-card overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-erp-bg dark:bg-slate-700/40 text-left text-xs uppercase text-erp-muted">
+            <tr>
+              <th className="px-4 py-3">Rank</th>
+              <th className="px-4 py-3">Supplier</th>
+              <th className="px-4 py-3">Items</th>
+              <th className="px-4 py-3">Inventory Value</th>
+              <th className="px-4 py-3">Monthly Cost</th>
+              <th className="px-4 py-3">Avg Lead Time</th>
+              <th className="px-4 py-3">Critical Items</th>
+              <th className="px-4 py-3">Payment Required</th>
+              <th className="px-4 py-3">Score</th>
+            </tr>
+          </thead>
+          <tbody>
+            {suppliers.map((s) => (
+              <tr key={s.supplier} className="border-t border-erp-border dark:border-slate-700">
+                <td className="px-4 py-2 font-semibold">{s.rank}</td>
+                <td className="px-4 py-2">{s.supplier}</td>
+                <td className="px-4 py-2">{formatNumber(s.itemsCount)}</td>
+                <td className="px-4 py-2">{formatCurrency(s.inventoryValue)}</td>
+                <td className="px-4 py-2">{formatCurrency(s.monthlyCost)}</td>
+                <td className="px-4 py-2">{formatNumber(s.avgLeadTime)} d</td>
+                <td className="px-4 py-2">{s.criticalItems}</td>
+                <td className="px-4 py-2">{formatCurrency(s.paymentRequired)}</td>
+                <td className="px-4 py-2 font-semibold">{s.score}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+##FILE-END::##
+##FILE-START::erp-inventory-dashboard/src/app/brands/page.tsx::##
+"use client";
+
+import Link from "next/link";
+import { useFetch } from "@/lib/useFetch";
+import { formatCurrency, formatNumber } from "@/lib/format";
+
+export default function BrandsPage() {
+  const { data } = useFetch<{ brands: any[] }>("/api/brands");
+  const brands = data?.brands || [];
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-xl font-bold text-slate-800 dark:text-white">Brand Dashboard</h1>
+        <p className="text-sm text-erp-muted">
+          Usage and exposure across Namq, Breehant, Roastery, Tando, Avola, and Laundah.
+        </p>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+        {brands.map((b) => (
+          <Link
+            key={b.brand}
+            href={`/brands/${b.brand}`}
+            className="block bg-erp-card dark:bg-slate-800 rounded-xl2 border border-erp-border dark:border-slate-700 shadow-card hover:shadow-cardHover transition-shadow p-4"
+          >
+            <h3 className="text-base font-semibold text-slate-800 dark:text-white">{b.brand}</h3>
+            <div className="grid grid-cols-2 gap-2 mt-3 text-sm">
+              <div>
+                <span className="text-erp-muted block text-xs">Items Used</span>
+                {formatNumber(b.itemsUsed)}
+              </div>
+              <div>
+                <span className="text-erp-muted block text-xs">Inventory Value</span>
+                {formatCurrency(b.inventoryValue)}
+              </div>
+              <div>
+                <span className="text-erp-muted block text-xs">Monthly Demand</span>
+                {formatNumber(b.monthlyDemand)}
+              </div>
+              <div>
+                <span className="text-erp-muted block text-xs">Avg Coverage</span>
+                {formatNumber(b.avgCoverage)} d
+              </div>
+              <div>
+                <span className="text-erp-muted block text-xs">Critical Items</span>
+                {formatNumber(b.criticalItems)}
+              </div>
+            </div>
+          </Link>
+        ))}
+      </div>
+    </div>
+  );
+}
+##FILE-END::##
+##FILE-START::erp-inventory-dashboard/src/app/brands/[brand]/page.tsx::##
+"use client";
+
+import Link from "next/link";
+import { ArrowLeft } from "lucide-react";
+import { useFetch } from "@/lib/useFetch";
+import { InventoryGrid } from "@/components/inventory/InventoryGrid";
+
+export default function BrandDetailPage({ params }: { params: { brand: string } }) {
+  const { data } = useFetch<{ items: any[] }>("/api/inventory");
+  const items = (data?.items || []).filter((i: any) => i.brands?.[params.brand]);
+
+  return (
+    <div className="space-y-4">
+      <Link href="/brands" className="inline-flex items-center gap-1 text-sm text-erp-accent">
+        <ArrowLeft size={14} /> Back to Brands
+      </Link>
+      <div>
+        <h1 className="text-xl font-bold text-slate-800 dark:text-white">{params.brand}</h1>
+        <p className="text-sm text-erp-muted">Items used by {params.brand}.</p>
+      </div>
+      <InventoryGrid items={items} />
+    </div>
+  );
+}
+##FILE-END::##

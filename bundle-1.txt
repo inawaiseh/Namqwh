@@ -1,0 +1,163 @@
+##FILE-START::erp-inventory-dashboard/package.json::##
+{
+  "name": "erp-inventory-dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "seed": "node scripts/generate-sample-data.js"
+  },
+  "dependencies": {
+    "@azure/msal-node": "^2.9.2",
+    "@microsoft/microsoft-graph-client": "^3.0.7",
+    "ag-grid-community": "^31.3.2",
+    "ag-grid-react": "^31.3.2",
+    "clsx": "^2.1.1",
+    "date-fns": "^3.6.0",
+    "echarts": "^5.5.0",
+    "echarts-for-react": "^3.0.2",
+    "isomorphic-fetch": "^3.0.0",
+    "jspdf": "^2.5.1",
+    "jspdf-autotable": "^3.8.2",
+    "lucide-react": "^0.400.0",
+    "next": "14.2.5",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.9",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "autoprefixer": "^10.4.19",
+    "postcss": "^8.4.38",
+    "tailwindcss": "^3.4.4",
+    "typescript": "^5.4.5"
+  }
+}
+##FILE-END::##
+##FILE-START::erp-inventory-dashboard/tsconfig.json::##
+{
+  "compilerOptions": {
+    "target": "ES2017",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": false,
+    "noImplicitAny": false,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "preserve",
+    "incremental": true,
+    "plugins": [{ "name": "next" }],
+    "baseUrl": ".",
+    "paths": { "@/*": ["src/*"] }
+  },
+  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
+  "exclude": ["node_modules"]
+}
+##FILE-END::##
+##FILE-START::erp-inventory-dashboard/next.config.js::##
+/** @type {import('next').NextConfig} */
+const nextConfig = {
+  reactStrictMode: true,
+  eslint: { ignoreDuringBuilds: true },
+  typescript: { ignoreBuildErrors: true },
+  webpack: (config, { isServer }) => {
+    if (!isServer) {
+      config.resolve.fallback = { ...config.resolve.fallback, fs: false, net: false, tls: false };
+    }
+    return config;
+  },
+};
+
+module.exports = nextConfig;
+##FILE-END::##
+##FILE-START::erp-inventory-dashboard/tailwind.config.ts::##
+import type { Config } from "tailwindcss";
+
+const config: Config = {
+  darkMode: "class",
+  content: [
+    "./src/app/**/*.{ts,tsx}",
+    "./src/components/**/*.{ts,tsx}",
+    "./src/lib/**/*.{ts,tsx}",
+  ],
+  theme: {
+    extend: {
+      colors: {
+        erp: {
+          navy: "#0B2545",
+          navy2: "#123064",
+          navyLight: "#1B3A6B",
+          accent: "#2E6BE6",
+          bg: "#F4F6FA",
+          card: "#FFFFFF",
+          border: "#E3E8F0",
+          critical: "#DC2626",
+          warning: "#D97706",
+          success: "#16A34A",
+          info: "#2563EB",
+          muted: "#64748B",
+        },
+      },
+      boxShadow: {
+        card: "0 1px 3px rgba(15, 23, 42, 0.08), 0 1px 2px rgba(15, 23, 42, 0.04)",
+        cardHover: "0 8px 24px rgba(15, 23, 42, 0.10)",
+      },
+      borderRadius: {
+        xl2: "1rem",
+      },
+    },
+  },
+  plugins: [],
+};
+
+export default config;
+##FILE-END::##
+##FILE-START::erp-inventory-dashboard/postcss.config.js::##
+module.exports = {
+  plugins: {
+    tailwindcss: {},
+    autoprefixer: {},
+  },
+};
+##FILE-END::##
+##FILE-START::erp-inventory-dashboard/.gitignore::##
+node_modules
+.next
+out
+.env
+.env.local
+data/sample/*.xlsx
+data/settings.json
+data/audit-log.json
+data/movement-history.json
+npm-debug.log*
+.DS_Store
+##FILE-END::##
+##FILE-START::erp-inventory-dashboard/.env.example::##
+# Leave all of these blank to run the app fully on generated sample data.
+# Fill them in once you have an Azure AD (Entra ID) app registration with
+# Sites.Read.Write.All and Files.ReadWrite.All (application permissions),
+# admin-consented, to connect live to SharePoint via Microsoft Graph.
+
+AZURE_TENANT_ID=
+AZURE_CLIENT_ID=
+AZURE_CLIENT_SECRET=
+GRAPH_SCOPE=https://graph.microsoft.com/.default
+##FILE-END::##
+##FILE-START::erp-inventory-dashboard/next-env.d.ts::##
+/// <reference types="next" />
+/// <reference types="next/image-types/global" />
+
+// NOTE: This file should not be edited
+// see https://nextjs.org/docs/basic-features/typescript for more information.
+##FILE-END::##

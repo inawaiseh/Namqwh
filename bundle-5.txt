@@ -1,0 +1,705 @@
+##FILE-START::erp-inventory-dashboard/src/components/providers/ThemeProvider.tsx::##
+"use client";
+
+import { createContext, useContext, useEffect, useState } from "react";
+
+type Theme = "light" | "dark";
+
+const ThemeContext = createContext<{ theme: Theme; toggleTheme: () => void }>({
+  theme: "light",
+  toggleTheme: () => {},
+});
+
+export function useTheme() {
+  return useContext(ThemeContext);
+}
+
+export function ThemeProvider({ children }: { children: React.ReactNode }) {
+  const [theme, setTheme] = useState<Theme>("light");
+
+  useEffect(() => {
+    const stored = (typeof window !== "undefined" && localStorage.getItem("erp-theme")) as Theme | null;
+    if (stored === "dark" || stored === "light") {
+      setTheme(stored);
+    } else {
+      fetch("/api/settings")
+        .then((r) => r.json())
+        .then((s) => {
+          if (s?.theme === "dark" || s?.theme === "light") setTheme(s.theme);
+        })
+        .catch(() => {});
+    }
+  }, []);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    if (theme === "dark") root.classList.add("dark");
+    else root.classList.remove("dark");
+    localStorage.setItem("erp-theme", theme);
+  }, [theme]);
+
+  const toggleTheme = () => setTheme((t) => (t === "light" ? "dark" : "light"));
+
+  return <ThemeContext.Provider value={{ theme, toggleTheme }}>{children}</ThemeContext.Provider>;
+}
+##FILE-END::##
+##FILE-START::erp-inventory-dashboard/src/components/providers/RefreshProvider.tsx::##
+"use client";
+
+import { createContext, useContext, useEffect, useRef, useState } from "react";
+
+interface RefreshContextValue {
+  refreshTick: number;
+  lastUpdated: Date | null;
+  intervalSeconds: number;
+  setIntervalSeconds: (s: number) => void;
+  manualRefresh: () => void;
+  isRefreshing: boolean;
+}
+
+const RefreshContext = createContext<RefreshContextValue>({
+  refreshTick: 0,
+  lastUpdated: null,
+  intervalSeconds: 60,
+  setIntervalSeconds: () => {},
+  manualRefresh: () => {},
+  isRefreshing: false,
+});
+
+export function useRefresh() {
+  return useContext(RefreshContext);
+}
+
+export function RefreshProvider({ children }: { children: React.ReactNode }) {
+  const [refreshTick, setRefreshTick] = useState(0);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [intervalSeconds, setIntervalSeconds] = useState(60);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    fetch("/api/settings")
+      .then((r) => r.json())
+      .then((s) => {
+        if (typeof s?.refreshIntervalSeconds === "number") {
+          setIntervalSeconds(s.refreshIntervalSeconds);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (timerRef.current) clearInterval(timerRef.current);
+    if (intervalSeconds > 0) {
+      timerRef.current = setInterval(() => {
+        bump();
+      }, intervalSeconds * 1000);
+    }
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [intervalSeconds]);
+
+  function bump() {
+    setIsRefreshing(true);
+    setRefreshTick((t) => t + 1);
+    setLastUpdated(new Date());
+    setTimeout(() => setIsRefreshing(false), 500);
+  }
+
+  return (
+    <RefreshContext.Provider
+      value={{
+        refreshTick,
+        lastUpdated,
+        intervalSeconds,
+        setIntervalSeconds,
+        manualRefresh: bump,
+        isRefreshing,
+      }}
+    >
+      {children}
+    </RefreshContext.Provider>
+  );
+}
+##FILE-END::##
+##FILE-START::erp-inventory-dashboard/src/components/providers/RoleProvider.tsx::##
+"use client";
+
+import { createContext, useContext, useEffect, useState } from "react";
+
+export type Role = "Admin" | "Inventory Manager" | "Warehouse" | "Purchasing" | "Viewer";
+
+export const ROLES: Role[] = ["Admin", "Inventory Manager", "Warehouse", "Purchasing", "Viewer"];
+
+export const ROLE_PERMISSIONS: Record<Role, { canEditSettings: boolean; canCreatePO: boolean; canExport: boolean }> = {
+  Admin: { canEditSettings: true, canCreatePO: true, canExport: true },
+  "Inventory Manager": { canEditSettings: false, canCreatePO: true, canExport: true },
+  Warehouse: { canEditSettings: false, canCreatePO: false, canExport: true },
+  Purchasing: { canEditSettings: false, canCreatePO: true, canExport: true },
+  Viewer: { canEditSettings: false, canCreatePO: false, canExport: false },
+};
+
+const RoleContext = createContext<{ role: Role; setRole: (r: Role) => void }>({
+  role: "Admin",
+  setRole: () => {},
+});
+
+export function useRole() {
+  return useContext(RoleContext);
+}
+
+export function RoleProvider({ children }: { children: React.ReactNode }) {
+  const [role, setRoleState] = useState<Role>("Admin");
+
+  useEffect(() => {
+    const stored = localStorage.getItem("erp-role") as Role | null;
+    if (stored && ROLES.includes(stored)) setRoleState(stored);
+  }, []);
+
+  const setRole = (r: Role) => {
+    setRoleState(r);
+    localStorage.setItem("erp-role", r);
+  };
+
+  return <RoleContext.Provider value={{ role, setRole }}>{children}</RoleContext.Provider>;
+}
+##FILE-END::##
+##FILE-START::erp-inventory-dashboard/src/components/providers/AppProviders.tsx::##
+"use client";
+
+import { ThemeProvider } from "./ThemeProvider";
+import { RefreshProvider } from "./RefreshProvider";
+import { RoleProvider } from "./RoleProvider";
+
+export function AppProviders({ children }: { children: React.ReactNode }) {
+  return (
+    <ThemeProvider>
+      <RoleProvider>
+        <RefreshProvider>{children}</RefreshProvider>
+      </RoleProvider>
+    </ThemeProvider>
+  );
+}
+##FILE-END::##
+##FILE-START::erp-inventory-dashboard/src/components/layout/Sidebar.tsx::##
+"use client";
+
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import {
+  LayoutDashboard,
+  Table2,
+  Sparkles,
+  Box,
+  Wheat,
+  Wrench,
+  Coffee,
+  PackageCheck,
+  Truck,
+  Tags,
+  BarChart3,
+  ShoppingCart,
+  Bell,
+  Settings,
+  ChevronDown,
+} from "lucide-react";
+import { useState } from "react";
+import clsx from "clsx";
+
+const CATEGORY_LINKS = [
+  { slug: "consumables", name: "Consumables", icon: Sparkles },
+  { slug: "packaging-materials", name: "Packaging Materials", icon: Box },
+  { slug: "raw-materials", name: "Raw Materials", icon: Wheat },
+  { slug: "fixed-assets", name: "Fixed Assets", icon: Wrench },
+  { slug: "green-beans", name: "Green Beans", icon: Coffee },
+  { slug: "finished-products", name: "Finished Products", icon: PackageCheck },
+];
+
+function NavItem({
+  href,
+  icon: Icon,
+  label,
+  active,
+}: {
+  href: string;
+  icon: any;
+  label: string;
+  active: boolean;
+}) {
+  return (
+    <Link
+      href={href}
+      className={clsx(
+        "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+        active
+          ? "bg-white/15 text-white"
+          : "text-blue-100/80 hover:bg-white/10 hover:text-white"
+      )}
+    >
+      <Icon size={17} strokeWidth={2} />
+      <span className="truncate">{label}</span>
+    </Link>
+  );
+}
+
+export function Sidebar() {
+  const pathname = usePathname();
+  const [categoriesOpen, setCategoriesOpen] = useState(true);
+
+  const isActive = (href: string) => pathname === href || pathname.startsWith(href + "/");
+
+  return (
+    <aside className="hidden lg:flex w-64 shrink-0 flex-col bg-erp-navy text-white h-screen sticky top-0">
+      <div className="flex items-center gap-2 px-5 h-16 border-b border-white/10">
+        <div className="h-8 w-8 rounded-lg bg-erp-accent flex items-center justify-center font-bold text-sm">
+          IE
+        </div>
+        <span className="font-semibold tracking-tight">Inventory ERP</span>
+      </div>
+
+      <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
+        <NavItem href="/dashboard" icon={LayoutDashboard} label="Home Dashboard" active={isActive("/dashboard")} />
+        <NavItem href="/inventory" icon={Table2} label="Inventory" active={isActive("/inventory")} />
+
+        <button
+          onClick={() => setCategoriesOpen((v) => !v)}
+          className="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold uppercase tracking-wider text-blue-200/70 mt-3"
+        >
+          Categories
+          <ChevronDown size={14} className={clsx("transition-transform", categoriesOpen && "rotate-180")} />
+        </button>
+        {categoriesOpen && (
+          <div className="space-y-1">
+            {CATEGORY_LINKS.map((c) => (
+              <NavItem
+                key={c.slug}
+                href={`/categories/${c.slug}`}
+                icon={c.icon}
+                label={c.name}
+                active={isActive(`/categories/${c.slug}`)}
+              />
+            ))}
+          </div>
+        )}
+
+        <div className="pt-3 space-y-1">
+          <NavItem href="/suppliers" icon={Truck} label="Suppliers" active={isActive("/suppliers")} />
+          <NavItem href="/brands" icon={Tags} label="Brands" active={isActive("/brands")} />
+          <NavItem href="/analytics" icon={BarChart3} label="Analytics" active={isActive("/analytics")} />
+          <NavItem href="/purchase-planning" icon={ShoppingCart} label="Purchase Planning" active={isActive("/purchase-planning")} />
+          <NavItem href="/alerts" icon={Bell} label="Alert Center" active={isActive("/alerts")} />
+        </div>
+      </nav>
+
+      <div className="px-3 py-4 border-t border-white/10">
+        <NavItem href="/settings" icon={Settings} label="Settings" active={isActive("/settings")} />
+      </div>
+    </aside>
+  );
+}
+
+export { CATEGORY_LINKS };
+##FILE-END::##
+##FILE-START::erp-inventory-dashboard/src/components/layout/Topbar.tsx::##
+"use client";
+
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { Search, RefreshCw, Sun, Moon, Bell, ChevronDown } from "lucide-react";
+import { useTheme } from "@/components/providers/ThemeProvider";
+import { useRefresh } from "@/components/providers/RefreshProvider";
+import { useRole, ROLES } from "@/components/providers/RoleProvider";
+import clsx from "clsx";
+
+const INTERVAL_OPTIONS = [
+  { label: "Manual", value: 0 },
+  { label: "30 Seconds", value: 30 },
+  { label: "1 Minute", value: 60 },
+  { label: "5 Minutes", value: 300 },
+];
+
+export function Topbar() {
+  const router = useRouter();
+  const { theme, toggleTheme } = useTheme();
+  const { intervalSeconds, setIntervalSeconds, manualRefresh, isRefreshing, lastUpdated } = useRefresh();
+  const { role, setRole } = useRole();
+  const [query, setQuery] = useState("");
+  const [alertCount, setAlertCount] = useState(0);
+  const [title, setTitle] = useState("Inventory ERP");
+
+  useEffect(() => {
+    fetch("/api/settings")
+      .then((r) => r.json())
+      .then((s) => setTitle(s.dashboardTitle || "Inventory ERP"))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    fetch("/api/alerts")
+      .then((r) => r.json())
+      .then((d) => setAlertCount((d.alerts || []).filter((a: any) => a.severity === "critical").length))
+      .catch(() => {});
+  }, []);
+
+  function onSearchSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    router.push(`/inventory?q=${encodeURIComponent(query)}`);
+  }
+
+  return (
+    <header className="sticky top-0 z-30 flex items-center gap-4 h-16 px-4 lg:px-6 bg-erp-navy text-white border-b border-white/10">
+      <span className="lg:hidden font-semibold">{title}</span>
+      <span className="hidden lg:block font-semibold">{title}</span>
+
+      <form onSubmit={onSearchSubmit} className="flex-1 max-w-xl">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-blue-200" size={16} />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search item code, description, supplier, brand..."
+            className="w-full rounded-lg bg-white/10 border border-white/10 py-2 pl-9 pr-3 text-sm placeholder:text-blue-200/60 focus:outline-none focus:ring-2 focus:ring-erp-accent"
+          />
+        </div>
+      </form>
+
+      <div className="ml-auto flex items-center gap-2">
+        <select
+          value={intervalSeconds}
+          onChange={(e) => setIntervalSeconds(Number(e.target.value))}
+          className="hidden md:block bg-white/10 border border-white/10 rounded-lg text-xs px-2 py-2"
+        >
+          {INTERVAL_OPTIONS.map((o) => (
+            <option className="text-black" key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+
+        <button
+          onClick={manualRefresh}
+          title="Refresh now"
+          className="p-2 rounded-lg hover:bg-white/10"
+        >
+          <RefreshCw size={17} className={clsx(isRefreshing && "animate-spin")} />
+        </button>
+
+        <button onClick={toggleTheme} title="Toggle theme" className="p-2 rounded-lg hover:bg-white/10">
+          {theme === "light" ? <Moon size={17} /> : <Sun size={17} />}
+        </button>
+
+        <div className="relative p-2 rounded-lg hover:bg-white/10 cursor-pointer" title="Critical alerts">
+          <Bell size={17} />
+          {alertCount > 0 && (
+            <span className="absolute -top-0.5 -right-0.5 bg-erp-critical text-[10px] leading-none rounded-full px-1.5 py-1 font-bold">
+              {alertCount}
+            </span>
+          )}
+        </div>
+
+        <div className="relative group">
+          <button className="flex items-center gap-1 bg-white/10 border border-white/10 rounded-lg px-3 py-2 text-xs">
+            {role} <ChevronDown size={14} />
+          </button>
+          <div className="absolute right-0 mt-1 hidden group-hover:block bg-white text-slate-800 rounded-lg shadow-cardHover border border-erp-border py-1 w-44 z-40">
+            {ROLES.map((r) => (
+              <button
+                key={r}
+                onClick={() => setRole(r)}
+                className={clsx(
+                  "w-full text-left px-3 py-2 text-sm hover:bg-erp-bg",
+                  r === role && "font-semibold text-erp-accent"
+                )}
+              >
+                {r}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {lastUpdated && (
+        <span className="hidden xl:block absolute right-6 -bottom-5 text-[11px] text-slate-400">
+          Updated {lastUpdated.toLocaleTimeString()}
+        </span>
+      )}
+    </header>
+  );
+}
+##FILE-END::##
+##FILE-START::erp-inventory-dashboard/src/components/layout/MobileNav.tsx::##
+"use client";
+
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { LayoutDashboard, Table2, BarChart3, ShoppingCart, Settings } from "lucide-react";
+import clsx from "clsx";
+
+const ITEMS = [
+  { href: "/dashboard", icon: LayoutDashboard, label: "Home" },
+  { href: "/inventory", icon: Table2, label: "Inventory" },
+  { href: "/analytics", icon: BarChart3, label: "Analytics" },
+  { href: "/purchase-planning", icon: ShoppingCart, label: "Purchasing" },
+  { href: "/settings", icon: Settings, label: "Settings" },
+];
+
+export function MobileNav() {
+  const pathname = usePathname();
+  return (
+    <nav className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-erp-navy border-t border-white/10 flex justify-around py-2">
+      {ITEMS.map((item) => {
+        const active = pathname.startsWith(item.href);
+        return (
+          <Link
+            key={item.href}
+            href={item.href}
+            className={clsx(
+              "flex flex-col items-center gap-0.5 text-[10px] px-2 py-1 rounded-lg",
+              active ? "text-white" : "text-blue-200/70"
+            )}
+          >
+            <item.icon size={18} />
+            {item.label}
+          </Link>
+        );
+      })}
+    </nav>
+  );
+}
+##FILE-END::##
+##FILE-START::erp-inventory-dashboard/src/components/layout/AppShell.tsx::##
+"use client";
+
+import { Sidebar } from "./Sidebar";
+import { Topbar } from "./Topbar";
+import { MobileNav } from "./MobileNav";
+
+export function AppShell({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex min-h-screen bg-erp-bg dark:bg-slate-900">
+      <Sidebar />
+      <div className="flex-1 flex flex-col min-w-0">
+        <Topbar />
+        <main className="flex-1 p-4 lg:p-6 pb-20 lg:pb-6">{children}</main>
+      </div>
+      <MobileNav />
+    </div>
+  );
+}
+##FILE-END::##
+##FILE-START::erp-inventory-dashboard/src/components/ui/KpiCard.tsx::##
+import { LucideIcon } from "lucide-react";
+import clsx from "clsx";
+
+const TONE_CLASSES: Record<string, string> = {
+  navy: "bg-erp-navy/10 text-erp-navy",
+  accent: "bg-blue-100 text-erp-accent",
+  success: "bg-green-100 text-erp-success",
+  warning: "bg-amber-100 text-erp-warning",
+  critical: "bg-red-100 text-erp-critical",
+  muted: "bg-slate-100 text-erp-muted",
+};
+
+export function KpiCard({
+  title,
+  value,
+  subtext,
+  icon: Icon,
+  tone = "accent",
+}: {
+  title: string;
+  value: string;
+  subtext?: string;
+  icon: LucideIcon;
+  tone?: keyof typeof TONE_CLASSES;
+}) {
+  return (
+    <div className="bg-erp-card dark:bg-slate-800 rounded-xl2 border border-erp-border dark:border-slate-700 shadow-card hover:shadow-cardHover transition-shadow p-4">
+      <div className="flex items-center justify-between mb-3">
+        <div className={clsx("h-9 w-9 rounded-lg flex items-center justify-center", TONE_CLASSES[tone])}>
+          <Icon size={18} />
+        </div>
+      </div>
+      <div className="text-2xl font-bold text-slate-800 dark:text-white leading-tight">{value}</div>
+      <div className="text-xs text-erp-muted mt-1">{title}</div>
+      {subtext && <div className="text-[11px] text-erp-muted mt-1">{subtext}</div>}
+    </div>
+  );
+}
+##FILE-END::##
+##FILE-START::erp-inventory-dashboard/src/components/ui/StatusBadge.tsx::##
+import clsx from "clsx";
+import { STATUS_COLORS, CRITICALITY_COLORS } from "@/lib/constants";
+
+export function StatusBadge({ status }: { status: string }) {
+  return (
+    <span
+      className={clsx(
+        "inline-flex items-center text-[11px] font-semibold px-2 py-0.5 rounded-full border",
+        STATUS_COLORS[status] || "bg-slate-100 text-slate-700 border-slate-300"
+      )}
+    >
+      {status}
+    </span>
+  );
+}
+
+export function CriticalityBadge({ level }: { level: string }) {
+  return (
+    <span
+      className={clsx(
+        "inline-flex items-center text-[11px] font-semibold px-2 py-0.5 rounded-full",
+        CRITICALITY_COLORS[level] || "bg-slate-100 text-slate-700"
+      )}
+    >
+      {level}
+    </span>
+  );
+}
+##FILE-END::##
+##FILE-START::erp-inventory-dashboard/src/components/ui/Gauge.tsx::##
+export function Gauge({ value, label }: { value: number; label?: string }) {
+  const clamped = Math.max(0, Math.min(100, value));
+  const angle = (clamped / 100) * 180;
+  const color = clamped >= 75 ? "#16A34A" : clamped >= 50 ? "#D97706" : "#DC2626";
+
+  const r = 80;
+  const cx = 100;
+  const cy = 100;
+  const toRad = (deg: number) => (Math.PI * deg) / 180;
+  const endX = cx - r * Math.cos(toRad(angle));
+  const endY = cy - r * Math.sin(toRad(angle));
+  const largeArc = angle > 180 ? 1 : 0;
+
+  return (
+    <div className="flex flex-col items-center">
+      <svg width="200" height="120" viewBox="0 0 200 120">
+        <path d="M 20 100 A 80 80 0 0 1 180 100" fill="none" stroke="#E2E8F0" strokeWidth="16" strokeLinecap="round" />
+        <path
+          d={`M 20 100 A 80 80 0 ${largeArc} 1 ${endX} ${endY}`}
+          fill="none"
+          stroke={color}
+          strokeWidth="16"
+          strokeLinecap="round"
+        />
+        <text x="100" y="95" textAnchor="middle" fontSize="28" fontWeight="700" fill="#1e293b">
+          {Math.round(clamped)}
+        </text>
+      </svg>
+      {label && <div className="text-xs text-erp-muted -mt-1">{label}</div>}
+    </div>
+  );
+}
+##FILE-END::##
+##FILE-START::erp-inventory-dashboard/src/components/charts/ChartCard.tsx::##
+"use client";
+
+import dynamic from "next/dynamic";
+
+const ReactECharts = dynamic(() => import("echarts-for-react"), { ssr: false });
+
+export function ChartCard({
+  title,
+  option,
+  height = 320,
+}: {
+  title: string;
+  option: any;
+  height?: number;
+}) {
+  return (
+    <div className="bg-erp-card dark:bg-slate-800 rounded-xl2 border border-erp-border dark:border-slate-700 shadow-card p-4">
+      <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-2">{title}</h3>
+      <ReactECharts option={option} style={{ height }} notMerge lazyUpdate />
+    </div>
+  );
+}
+##FILE-END::##
+##FILE-START::erp-inventory-dashboard/src/components/alerts/AlertCard.tsx::##
+import { AlertTriangle, AlertOctagon, Info } from "lucide-react";
+import clsx from "clsx";
+import Link from "next/link";
+import { AlertItem } from "@/lib/types";
+
+const STYLES: Record<string, { border: string; bg: string; icon: any; iconColor: string }> = {
+  critical: { border: "border-red-300", bg: "bg-red-50", icon: AlertOctagon, iconColor: "text-erp-critical" },
+  warning: { border: "border-amber-300", bg: "bg-amber-50", icon: AlertTriangle, iconColor: "text-erp-warning" },
+  info: { border: "border-blue-300", bg: "bg-blue-50", icon: Info, iconColor: "text-erp-info" },
+};
+
+export function AlertCard({ alert }: { alert: AlertItem }) {
+  const s = STYLES[alert.severity];
+  const Icon = s.icon;
+  return (
+    <div className={clsx("rounded-xl2 border p-3 flex items-start gap-3", s.border, s.bg)}>
+      <Icon size={18} className={clsx("mt-0.5 shrink-0", s.iconColor)} />
+      <div className="min-w-0">
+        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{alert.type}</div>
+        <div className="text-sm text-slate-800">{alert.message}</div>
+        {alert.itemCode && (
+          <Link href={`/inventory/${alert.itemCode}`} className="text-xs text-erp-accent font-medium hover:underline">
+            View item &rarr;
+          </Link>
+        )}
+      </div>
+    </div>
+  );
+}
+##FILE-END::##
+##FILE-START::erp-inventory-dashboard/src/lib/exportUtils.ts::##
+"use client";
+
+import * as XLSX from "xlsx";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
+
+export function exportToCSV(rows: Record<string, any>[], filename: string) {
+  const ws = XLSX.utils.json_to_sheet(rows);
+  const csv = XLSX.utils.sheet_to_csv(ws);
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  downloadBlob(blob, `${filename}.csv`);
+}
+
+export function exportToExcel(rows: Record<string, any>[], filename: string) {
+  const ws = XLSX.utils.json_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Export");
+  // Build the file as a raw array buffer and trigger the download manually
+  // (more reliable than XLSX.writeFile inside a bundled client component,
+  // since SheetJS's environment auto-detection can misfire under webpack).
+  const buf: ArrayBuffer = XLSX.write(wb, { type: "array", bookType: "xlsx" });
+  const blob = new Blob([buf], { type: "application/octet-stream" });
+  downloadBlob(blob, `${filename}.xlsx`);
+}
+
+export function exportToPDF(rows: Record<string, any>[], filename: string, title = "Inventory Report") {
+  const doc = new jsPDF({ orientation: "landscape" });
+  doc.setFontSize(14);
+  doc.text(title, 14, 15);
+  if (rows.length > 0) {
+    const columns = Object.keys(rows[0]);
+    const body = rows.map((r) => columns.map((c) => String(r[c] ?? "")));
+    autoTable(doc, {
+      head: [columns],
+      body,
+      startY: 20,
+      styles: { fontSize: 7 },
+      headStyles: { fillColor: [11, 37, 69] },
+    });
+  }
+  doc.save(`${filename}.pdf`);
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+##FILE-END::##

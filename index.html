@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Inventory ERP</title>
+
+<!-- Tailwind (Play CDN, no build step) -->
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    darkMode: "class",
+    theme: {
+      extend: {
+        colors: {
+          erp: {
+            navy: "var(--erp-navy)",
+            accent: "var(--erp-accent)",
+            bg: "var(--erp-bg)",
+            card: "var(--erp-card-bg)",
+            border: "var(--erp-card-border)",
+            critical: "#DC2626",
+            warning: "#D97706",
+            success: "#16A34A",
+            info: "#2563EB",
+            muted: "#64748B",
+          },
+        },
+        boxShadow: {
+          card: "0 1px 3px rgba(15,23,42,.08), 0 1px 2px rgba(15,23,42,.04)",
+          cardHover: "0 8px 24px rgba(15,23,42,.10)",
+        },
+        borderRadius: { xl2: "1rem" },
+      },
+    },
+  };
+</script>
+
+<!-- AG Grid (vanilla JS build) -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@31.3.2/styles/ag-grid.css" />
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@31.3.2/styles/ag-theme-quartz.css" />
+<script src="https://cdn.jsdelivr.net/npm/ag-grid-community@31.3.2/dist/ag-grid-community.min.js"></script>
+
+<!-- ECharts -->
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+
+<!-- Export helpers -->
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
+
+<!-- Icons -->
+<script src="https://unpkg.com/lucide@latest"></script>
+
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<div id="loginScreen"></div>
+
+<div id="shell" class="hidden flex min-h-screen">
+  <aside id="sidebar" class="hidden lg:flex w-64 shrink-0 flex-col bg-erp-navy text-white h-screen sticky top-0"></aside>
+
+  <div class="flex-1 flex flex-col min-w-0">
+    <header id="topbar" class="sticky top-0 z-30 flex items-center gap-4 h-16 px-4 lg:px-6 bg-erp-navy text-white border-b border-white/10"></header>
+    <main id="app" class="flex-1 p-4 lg:p-6 pb-20 lg:pb-6"></main>
+  </div>
+
+  <nav id="mobileNav" class="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-erp-navy border-t border-white/10 flex justify-around py-2"></nav>
+</div>
+
+<script src="data.js"></script>
+<script src="i18n.js"></script>
+<script src="app-state.js"></script>
+<script src="app-pages-core.js"></script>
+<script src="app-pages-more.js"></script>
+<script src="app-purchasing.js"></script>
+<script src="app-settings.js"></script>
+<script src="app-shell.js"></script>
+</body>
+</html>
