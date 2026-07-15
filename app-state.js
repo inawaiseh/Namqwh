@@ -34,6 +34,8 @@ const defaultSettings = {
   sharePointUrl: "https://company.sharepoint.com/sites/Inventory/Shared Documents/Master.xlsx",
   worksheetName: "Master File July-26",
   proxyUrl: "",
+  authWorkerUrl: "",
+  authAdminKey: "",
   refreshIntervalSeconds: 60,
   dataSource: "sample",
   locale: "en",

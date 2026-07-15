@@ -5,10 +5,20 @@
 
 function renderUsersRows() {
   return USERS.map(
-    (u) =>
-      `<tr><td>${u.name || "-"}</td><td>${u.email}</td><td>${t("role." + u.role)}</td><td><button class="deleteUserBtn text-xs text-red-600 hover:underline" data-email="${escapeAttr(u.email)}">${t("settings.delete")}</button></td></tr>`
+    (u) => `
+    <tr>
+      <td>${escapeHtml(u.name || "-")}</td>
+      <td>${escapeHtml(u.email)}</td>
+      <td>${t("role." + u.role)}</td>
+      <td style="white-space:nowrap">
+        <button class="editUserBtn text-xs text-erp-accent hover:underline" data-email="${escapeAttr(u.email)}">${t("settings.edit")}</button>
+        &middot;
+        <button class="deleteUserBtn text-xs text-red-600 hover:underline" data-email="${escapeAttr(u.email)}">${t("settings.delete")}</button>
+      </td>
+    </tr>`
   ).join("");
 }
+
 function renderUsersSection() {
   return `
     <div class="card p-5 space-y-4">
@@ -21,61 +31,128 @@ function renderUsersSection() {
       </div>
       <div id="userMsg"></div>
       <div class="grid grid-cols-1 md:grid-cols-4 gap-2 items-end">
+        <input type="hidden" id="editingUserEmail" value="" />
         <label class="block"><span class="block text-xs text-erp-muted mb-1">${t("settings.name")}</span><input id="newUserName" class="field-input" /></label>
         <label class="block"><span class="block text-xs text-erp-muted mb-1">${t("settings.email")}</span><input id="newUserEmail" type="email" class="field-input" /></label>
-        <label class="block"><span class="block text-xs text-erp-muted mb-1">${t("settings.password")}</span><input id="newUserPassword" type="text" class="field-input" /></label>
+        <label class="block"><span class="block text-xs text-erp-muted mb-1" id="newUserPasswordLabel">${t("settings.password")}</span><input id="newUserPassword" type="text" class="field-input" /></label>
         <label class="block"><span class="block text-xs text-erp-muted mb-1">${t("settings.role")}</span>
           <select id="newUserRole" class="field-input">${ROLES.map((r) => `<option value="${r}">${t("role." + r)}</option>`).join("")}</select>
         </label>
       </div>
-      <button id="addUserBtn" class="btn btn-primary"><i data-lucide="user-plus" style="width:15px;height:15px"></i> ${t("settings.addUser")}</button>
+      <div class="flex gap-2">
+        <button id="addUserBtn" class="btn btn-primary"><i data-lucide="user-plus" style="width:15px;height:15px"></i> <span id="addUserBtnLabel">${t("settings.addUser")}</span></button>
+        <button id="cancelEditUserBtn" class="btn hidden">${t("settings.cancel")}</button>
+      </div>
+
+      <div class="pt-3 border-t border-erp-border space-y-2">
+        <h4 class="text-xs font-semibold uppercase tracking-wide text-erp-muted">${t("settings.centralizedAccounts")}</h4>
+        <p class="text-[11px] text-erp-muted">${t("settings.centralizedAccountsHelp")}</p>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+          <label class="block"><span class="block text-xs text-erp-muted mb-1">${t("settings.authWorkerUrl")}</span><input id="setAuthWorkerUrl" class="field-input" placeholder="https://your-auth-worker.workers.dev" value="${escapeAttr(SETTINGS.authWorkerUrl || "")}" /></label>
+          <label class="block"><span class="block text-xs text-erp-muted mb-1">${t("settings.authAdminKey")}</span><input id="setAuthAdminKey" type="password" class="field-input" value="${escapeAttr(SETTINGS.authAdminKey || "")}" /></label>
+        </div>
+      </div>
     </div>
   `;
 }
-function wireDeleteButtons() {
+
+function resetUserForm() {
+  document.getElementById("editingUserEmail").value = "";
+  document.getElementById("newUserName").value = "";
+  document.getElementById("newUserEmail").value = "";
+  document.getElementById("newUserEmail").disabled = false;
+  document.getElementById("newUserPassword").value = "";
+  document.getElementById("newUserRole").value = ROLES[0];
+  document.getElementById("addUserBtnLabel").textContent = t("settings.addUser");
+  document.getElementById("cancelEditUserBtn").classList.add("hidden");
+  document.getElementById("newUserPasswordLabel").textContent = t("settings.password");
+}
+
+async function refreshUsersTable() {
+  await apiListUsers();
+  document.getElementById("usersTableBody").innerHTML = renderUsersRows();
+  wireRowButtons();
+  if (window.lucide) lucide.createIcons();
+}
+
+function wireRowButtons() {
   document.querySelectorAll(".deleteUserBtn").forEach((btn) =>
-    btn.addEventListener("click", () => {
+    btn.addEventListener("click", async () => {
       const email = btn.dataset.email;
       if (email.toLowerCase() === CURRENT_USER.email.toLowerCase()) {
-        document.getElementById("userMsg").innerHTML = `<div class="text-sm bg-amber-50 border border-amber-200 text-amber-800 rounded-lg px-3 py-2">${t("settings.cannotDeleteSelf")}</div>`;
+        document.getElementById("userMsg").innerHTML = msgBox(t("settings.cannotDeleteSelf"), "warning");
         return;
       }
-      USERS = USERS.filter((u) => u.email !== email);
-      saveUsers();
-      document.getElementById("usersTableBody").innerHTML = renderUsersRows();
-      wireDeleteButtons();
+      const result = await apiDeleteUser(email);
+      const msgEl = document.getElementById("userMsg");
+      if (!result.ok) {
+        msgEl.innerHTML = msgBox(result.error || "Failed.", "error");
+        return;
+      }
+      await refreshUsersTable();
+    })
+  );
+  document.querySelectorAll(".editUserBtn").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      const user = USERS.find((u) => u.email === btn.dataset.email);
+      if (!user) return;
+      document.getElementById("editingUserEmail").value = user.email;
+      document.getElementById("newUserName").value = user.name || "";
+      document.getElementById("newUserEmail").value = user.email;
+      document.getElementById("newUserEmail").disabled = true;
+      document.getElementById("newUserPassword").value = "";
+      document.getElementById("newUserRole").value = user.role;
+      document.getElementById("addUserBtnLabel").textContent = t("settings.updateUser");
+      document.getElementById("cancelEditUserBtn").classList.remove("hidden");
+      document.getElementById("newUserPasswordLabel").textContent = t("settings.newPasswordOptional");
     })
   );
 }
+
 function wireUsersSection() {
-  document.getElementById("addUserBtn").addEventListener("click", () => {
+  wireRowButtons();
+  document.getElementById("cancelEditUserBtn").addEventListener("click", resetUserForm);
+  document.getElementById("addUserBtn").addEventListener("click", async () => {
+    const editingEmail = document.getElementById("editingUserEmail").value;
     const name = document.getElementById("newUserName").value.trim();
     const email = document.getElementById("newUserEmail").value.trim();
     const password = document.getElementById("newUserPassword").value;
     const role = document.getElementById("newUserRole").value;
     const msgEl = document.getElementById("userMsg");
-    if (!email || !password) return;
-    if (USERS.some((u) => u.email.toLowerCase() === email.toLowerCase())) {
-      msgEl.innerHTML = `<div class="text-sm bg-amber-50 border border-amber-200 text-amber-800 rounded-lg px-3 py-2">${t("settings.userExists")}</div>`;
+
+    if (editingEmail) {
+      const patch = { name, role };
+      if (password) patch.password = password;
+      const result = await apiUpdateUser(editingEmail, patch);
+      if (!result.ok) {
+        msgEl.innerHTML = msgBox(result.error || t("settings.userExists"), "error");
+        return;
+      }
+      msgEl.innerHTML = msgBox(t("settings.userUpdated"), "success");
+      resetUserForm();
+      await refreshUsersTable();
       return;
     }
-    USERS.push({ name, email, password, role });
-    saveUsers();
-    document.getElementById("usersTableBody").innerHTML = renderUsersRows();
-    wireDeleteButtons();
-    msgEl.innerHTML = `<div class="text-sm bg-green-50 border border-green-200 text-green-700 rounded-lg px-3 py-2">${t("settings.userAdded")}</div>`;
-    document.getElementById("newUserName").value = "";
-    document.getElementById("newUserEmail").value = "";
-    document.getElementById("newUserPassword").value = "";
+
+    if (!email || !password) return;
+    const result = await apiAddUser({ name, email, password, role });
+    if (!result.ok) {
+      msgEl.innerHTML = msgBox(t("settings.userExists"), "warning");
+      return;
+    }
+    msgEl.innerHTML = msgBox(t("settings.userAdded"), "success");
+    resetUserForm();
+    await refreshUsersTable();
   });
-  wireDeleteButtons();
 }
 
-function renderSettings() {
+async function renderSettings() {
   const app = document.getElementById("app");
   const isAdmin = ROLE_PERMISSIONS[CURRENT_USER.role].canEditSettings;
   const s = SETTINGS;
   const sec = s.dashboardSections;
+
+  if (isAdmin) await apiListUsers();
 
   app.innerHTML = `
     <div class="space-y-6" style="max-width:52rem">
@@ -186,6 +263,8 @@ function renderSettings() {
         sharePointUrl: document.getElementById("setUrl").value,
         worksheetName: document.getElementById("setSheet").value,
         proxyUrl: document.getElementById("setProxyUrl").value,
+        authWorkerUrl: document.getElementById("setAuthWorkerUrl").value.trim(),
+        authAdminKey: document.getElementById("setAuthAdminKey").value,
         refreshIntervalSeconds: Number(document.getElementById("setInterval").value),
         dashboardTitle: document.getElementById("setTitle").value,
         companyLogo: document.getElementById("setLogo").value,
@@ -208,12 +287,12 @@ function renderSettings() {
       applyLocaleDirection();
       resetAutoRefresh();
       renderShell(parseHash());
-      renderSettings();
+      await renderSettings();
       const msgEl = document.getElementById("setMsg");
       if (msgEl) msgEl.innerHTML = msgBox(t("settings.savedMsg"), "success");
       if (SETTINGS.dataSource === "live" && SETTINGS.sharePointUrl) {
         await syncLiveData(true);
-        renderSettings();
+        await renderSettings();
       }
     });
     document.getElementById("setReload").addEventListener("click", performRefresh);

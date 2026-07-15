@@ -28,11 +28,14 @@ function renderLogin() {
       </div>
     </div>
   `;
-  document.getElementById("loginForm").addEventListener("submit", (e) => {
+  document.getElementById("loginForm").addEventListener("submit", async (e) => {
     e.preventDefault();
     const email = document.getElementById("loginEmail").value.trim();
     const password = document.getElementById("loginPassword").value;
-    const user = USERS.find((u) => u.email.toLowerCase() === email.toLowerCase() && u.password === password);
+    const submitBtn = document.querySelector("#loginForm button[type=submit]");
+    submitBtn.disabled = true;
+    const user = await apiLogin(email, password);
+    submitBtn.disabled = false;
     if (!user) {
       document.getElementById("loginError").innerHTML = `<div class="text-sm bg-red-50 border border-red-200 text-red-700 rounded-lg px-3 py-2 mb-3">${t("login.invalid")}</div>`;
       return;
@@ -140,6 +143,7 @@ function renderTopbarHTML() {
         <button id="userBtn" class="flex items-center gap-1 bg-white/10 border border-white/10 rounded-lg px-3 py-2 text-xs">${escapeAttr(CURRENT_USER.name || CURRENT_USER.email)} <i data-lucide="chevron-down" style="width:14px;height:14px"></i></button>
         <div class="absolute right-0 mt-1 hidden group-hover:block bg-white text-slate-800 rounded-lg shadow-cardHover border border-erp-border py-1 z-40" style="width:12rem">
           <div class="px-3 py-2 text-xs text-erp-muted border-b border-erp-border">${t("role." + CURRENT_USER.role)}</div>
+          <a href="#/change-password" class="block px-3 py-2 text-sm hover:bg-erp-bg">${t("topbar.changePassword")}</a>
           <button id="logoutBtn" class="w-full text-left px-3 py-2 text-sm hover:bg-erp-bg">${t("topbar.logout")}</button>
         </div>
       </div>
@@ -190,6 +194,48 @@ function showToast(message, kind) {
     el.classList.remove("show");
     setTimeout(() => el.remove(), 300);
   }, 4500);
+}
+
+function renderChangePassword() {
+  const app = document.getElementById("app");
+  app.innerHTML = `
+    <div style="max-width:28rem" class="space-y-4">
+      <h1 class="text-xl font-bold">${t("account.changePassword")}</h1>
+      <div class="card p-5 space-y-3">
+        <label class="block"><span class="block text-xs text-erp-muted mb-1">${t("account.currentPassword")}</span><input id="cpCurrent" type="password" class="field-input" /></label>
+        <label class="block"><span class="block text-xs text-erp-muted mb-1">${t("account.newPassword")}</span><input id="cpNew" type="password" class="field-input" /></label>
+        <label class="block"><span class="block text-xs text-erp-muted mb-1">${t("account.confirmPassword")}</span><input id="cpConfirm" type="password" class="field-input" /></label>
+        <button id="cpSave" class="btn btn-primary"><i data-lucide="key" style="width:14px;height:14px"></i> ${t("account.updatePassword")}</button>
+        <div id="cpMsg"></div>
+      </div>
+    </div>
+  `;
+  document.getElementById("cpSave").addEventListener("click", async () => {
+    const current = document.getElementById("cpCurrent").value;
+    const next = document.getElementById("cpNew").value;
+    const confirmVal = document.getElementById("cpConfirm").value;
+    const msgEl = document.getElementById("cpMsg");
+    if (!next || next.length < 4) {
+      msgEl.innerHTML = msgBox(t("account.passwordTooShort"), "warning");
+      return;
+    }
+    if (next !== confirmVal) {
+      msgEl.innerHTML = msgBox(t("account.passwordMismatch"), "warning");
+      return;
+    }
+    const result = await apiChangePassword(CURRENT_USER.email, current, next);
+    if (!result.ok) {
+      msgEl.innerHTML = msgBox(t("account.currentPasswordWrong"), "error");
+      return;
+    }
+    CURRENT_USER.password = next;
+    saveCurrentUser(CURRENT_USER);
+    msgEl.innerHTML = msgBox(t("account.passwordUpdated"), "success");
+    document.getElementById("cpCurrent").value = "";
+    document.getElementById("cpNew").value = "";
+    document.getElementById("cpConfirm").value = "";
+  });
+  if (window.lucide) lucide.createIcons();
 }
 
 function wireShellEvents(route) {
@@ -249,6 +295,7 @@ function render() {
   else if (seg === "analytics") renderAnalytics();
   else if (seg === "purchase-planning") renderPurchasePlanning(route.query.get("source"));
   else if (seg === "alerts") renderAlerts();
+  else if (seg === "change-password") renderChangePassword();
   else if (seg === "settings") renderSettings();
   else {
     location.hash = "#/dashboard";
