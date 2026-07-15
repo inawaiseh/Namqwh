@@ -1,33 +1,59 @@
 /* ============================================================
    Inventory ERP — Auth/Users data layer
 
-   Two ways accounts can work, chosen by whether a shared database
-   is configured (Settings -> Users -> Shared Accounts Database):
+   Two layers of shared-account access, so login works on any device
+   with zero setup while account management stays admin-only:
 
-   1. Not configured (default): accounts live only in this browser's
-      localStorage. Use Export/Import to move accounts between
-      devices manually.
+   1. READ (baked into the app, always on): PUBLIC_USERS_BIN_ID /
+      PUBLIC_USERS_READ_KEY below are a jsonbin.io bin + a read-only
+      Access Key. Every device — even one that's never opened
+      Settings — uses these automatically to check logins against
+      the shared account list. A read-only key can only view the
+      bin, never change it, so it's safe to ship in public source.
 
-   2. Configured: every login/add/edit/delete reads and writes a
-      small free hosted JSON store (jsonbin.io — no server code, no
-      deployment, just a free account and two values pasted into
-      Settings). Every device with a network connection then sees
-      the same accounts automatically.
+   2. WRITE (Settings -> Users -> Shared Accounts Database, admin
+      only): the admin's own device additionally has the bin's full
+      Master Key, entered manually in Settings. Only that key can
+      add, edit, delete, or change a password — regular devices
+      can check logins but can't modify the account list.
 
-   If the shared database is unreachable for any reason, everything
-   falls back to the local copy so a network hiccup can never fully
-   lock someone out.
+   If neither is configured, or the shared bin is unreachable,
+   everything falls back to this device's local copy so a network
+   hiccup can never fully lock someone out.
    ============================================================ */
 
-function hasSharedStore() {
+const PUBLIC_USERS_BIN_ID = "6a579c52da38895dfe616bde";
+const PUBLIC_USERS_READ_KEY = "$2a$10$E2Ti7x/SGWucSd.NDQC92.tniHdrsGBfU7pQ8uEUzl12fQgzGmqfq";
+
+// Does this device have the admin Master Key (can add/edit/delete/change)?
+function hasWriteAccess() {
   return !!(SETTINGS.usersBinId && SETTINGS.usersBinId.trim() && SETTINGS.usersApiKey && SETTINGS.usersApiKey.trim());
+}
+// Can this device at least check logins, whether via its own configured
+// Master Key or the read-only key baked into the app?
+function hasSharedReadAccess() {
+  return hasWriteAccess() || !!(PUBLIC_USERS_BIN_ID && PUBLIC_USERS_READ_KEY);
+}
+// Kept for any older call sites / Settings badge — "configured for write".
+function hasSharedStore() {
+  return hasWriteAccess();
+}
+
+function readBinId() {
+  return (SETTINGS.usersBinId && SETTINGS.usersBinId.trim()) || PUBLIC_USERS_BIN_ID;
+}
+function readAuthHeaders() {
+  if (SETTINGS.usersApiKey && SETTINGS.usersApiKey.trim()) return { "X-Master-Key": SETTINGS.usersApiKey.trim() };
+  if (PUBLIC_USERS_READ_KEY) return { "X-Access-Key": PUBLIC_USERS_READ_KEY };
+  return {};
 }
 function sharedStoreUrl() {
   return `https://api.jsonbin.io/v3/b/${SETTINGS.usersBinId.trim()}`;
 }
+
 async function fetchRemoteUsers() {
-  const res = await fetch(`${sharedStoreUrl()}/latest`, {
-    headers: { "X-Master-Key": SETTINGS.usersApiKey.trim(), "X-Bin-Meta": "false" },
+  const res = await fetch(`https://api.jsonbin.io/v3/b/${readBinId()}/latest`, {
+    headers: { ...readAuthHeaders(), "X-Bin-Meta": "false" },
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const data = await res.json();
@@ -36,6 +62,11 @@ async function fetchRemoteUsers() {
   return [];
 }
 async function saveRemoteUsers(users) {
+  if (!hasWriteAccess()) {
+    const e = new Error("No admin key configured on this device — it can check logins but can't save changes.");
+    e.code = "NO_WRITE_ACCESS";
+    throw e;
+  }
   const res = await fetch(sharedStoreUrl(), {
     method: "PUT",
     headers: { "Content-Type": "application/json", "X-Master-Key": SETTINGS.usersApiKey.trim() },
@@ -44,11 +75,24 @@ async function saveRemoteUsers(users) {
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
 }
 
-// Actually attempts the connection (unlike hasSharedStore, which only checks
+// Actually attempts the connection (unlike hasWriteAccess, which only checks
 // that the fields are filled in) so Settings and the login screen can show
 // the real reason a shared login isn't working, instead of failing silently.
 async function checkSharedStoreStatus() {
-  if (!hasSharedStore()) return { configured: false, connected: false };
+  if (!hasWriteAccess()) return { configured: false, connected: false };
+  try {
+    await fetchRemoteUsers();
+    return { configured: true, connected: true };
+  } catch (e) {
+    return { configured: true, connected: false, error: e.message || String(e) };
+  }
+}
+
+// Same idea, but for the read path used on the login screen — checks
+// whatever key this device actually has (baked-in read key or an admin's
+// own Master Key), so the diagnostic matches what apiLogin really did.
+async function checkSharedReadStatus() {
+  if (!hasSharedReadAccess()) return { configured: false, connected: false };
   try {
     await fetchRemoteUsers();
     return { configured: true, connected: true };
@@ -58,7 +102,7 @@ async function checkSharedStoreStatus() {
 }
 
 async function apiLogin(email, password) {
-  if (hasSharedStore()) {
+  if (hasSharedReadAccess()) {
     try {
       const remoteUsers = await fetchRemoteUsers();
       USERS = remoteUsers;
@@ -111,7 +155,7 @@ function importUsersFile(file) {
 }
 
 async function apiListUsers() {
-  if (hasSharedStore()) {
+  if (hasSharedReadAccess()) {
     try {
       USERS = await fetchRemoteUsers();
       saveUsers();
@@ -124,7 +168,7 @@ async function apiListUsers() {
 }
 
 async function apiAddUser(user) {
-  if (hasSharedStore()) {
+  if (hasWriteAccess()) {
     try {
       const remoteUsers = await fetchRemoteUsers();
       if (remoteUsers.some((u) => u.email.toLowerCase() === user.email.toLowerCase())) return { ok: false, error: "exists" };
@@ -144,7 +188,7 @@ async function apiAddUser(user) {
 }
 
 async function apiUpdateUser(email, patch) {
-  if (hasSharedStore()) {
+  if (hasWriteAccess()) {
     try {
       const remoteUsers = await fetchRemoteUsers();
       const u = remoteUsers.find((x) => x.email.toLowerCase() === email.toLowerCase());
@@ -166,7 +210,7 @@ async function apiUpdateUser(email, patch) {
 }
 
 async function apiDeleteUser(email) {
-  if (hasSharedStore()) {
+  if (hasWriteAccess()) {
     try {
       const remoteUsers = await fetchRemoteUsers();
       const filtered = remoteUsers.filter((u) => u.email.toLowerCase() !== email.toLowerCase());
@@ -184,17 +228,21 @@ async function apiDeleteUser(email) {
 }
 
 async function apiChangePassword(email, currentPassword, newPassword) {
-  if (hasSharedStore()) {
+  if (hasSharedReadAccess()) {
     try {
       const remoteUsers = await fetchRemoteUsers();
       const u = remoteUsers.find((x) => x.email.toLowerCase() === email.toLowerCase());
       if (!u || u.password !== currentPassword) return { ok: false, error: "invalid" };
+      if (!hasWriteAccess()) {
+        return { ok: false, error: "This device can check logins but isn't set up to save changes to the shared database. Ask your admin to change it from their device." };
+      }
       u.password = newPassword;
       await saveRemoteUsers(remoteUsers);
       USERS = remoteUsers;
       saveUsers();
       return { ok: true };
     } catch (e) {
+      if (e && e.code === "NO_WRITE_ACCESS") return { ok: false, error: e.message };
       return { ok: false, error: `Could not reach the shared accounts database (${e.message || e}).` };
     }
   }

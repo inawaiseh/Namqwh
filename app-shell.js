@@ -44,8 +44,8 @@ function renderLogin() {
     const user = await apiLogin(email, password);
     if (!user) {
       let extra = "";
-      if (hasSharedStore()) {
-        const status = await checkSharedStoreStatus();
+      if (hasSharedReadAccess()) {
+        const status = await checkSharedReadStatus();
         if (!status.connected) {
           extra = `<div class="text-xs bg-amber-50 border border-amber-200 text-amber-800 rounded-lg px-3 py-2 mb-3">${t("login.sharedStoreUnreachable").replace("{error}", escapeHtml(status.error || ""))}</div>`;
         }

@@ -33,6 +33,7 @@ function renderUsersSection(storeStatus) {
         <h3 class="text-sm font-semibold">${t("settings.users")}</h3>
         <span class="text-[11px] font-medium px-2 py-1 rounded-full ${badgeClass}">${badgeLabel}</span>
       </div>
+      <p class="text-[11px] text-erp-muted">${t("settings.sharedAccountsIntro")}</p>
       ${status.configured && !status.connected ? msgBox(t("settings.sharedAccountsErrorDetail").replace("{error}", escapeHtml(status.error || "")), "error") : ""}
       <div class="overflow-x-auto">
         <table class="erp-table">
