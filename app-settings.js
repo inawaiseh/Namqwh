@@ -20,9 +20,15 @@ function renderUsersRows() {
 }
 
 function renderUsersSection() {
+  const connected = hasSharedStore();
   return `
     <div class="card p-5 space-y-4">
-      <h3 class="text-sm font-semibold">${t("settings.users")}</h3>
+      <div class="flex items-center justify-between flex-wrap gap-2">
+        <h3 class="text-sm font-semibold">${t("settings.users")}</h3>
+        <span class="text-[11px] font-medium px-2 py-1 rounded-full ${connected ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "bg-amber-50 text-amber-700 border border-amber-200"}">
+          ${connected ? t("settings.accountsShared") : t("settings.accountsLocalOnly")}
+        </span>
+      </div>
       <div class="overflow-x-auto">
         <table class="erp-table">
           <thead><tr><th>${t("settings.name")}</th><th>${t("settings.email")}</th><th>${t("settings.role")}</th><th>${t("settings.actions")}</th></tr></thead>
@@ -45,12 +51,19 @@ function renderUsersSection() {
       </div>
 
       <div class="pt-3 border-t border-erp-border space-y-2">
-        <h4 class="text-xs font-semibold uppercase tracking-wide text-erp-muted">${t("settings.centralizedAccounts")}</h4>
-        <p class="text-[11px] text-erp-muted">${t("settings.centralizedAccountsHelp")}</p>
+        <h4 class="text-xs font-semibold uppercase tracking-wide text-erp-muted">${t("settings.sharedAccounts")}</h4>
+        <p class="text-[11px] text-erp-muted whitespace-pre-line">${t("settings.sharedAccountsHelp")}</p>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
-          <label class="block"><span class="block text-xs text-erp-muted mb-1">${t("settings.authWorkerUrl")}</span><input id="setAuthWorkerUrl" class="field-input" placeholder="https://your-auth-worker.workers.dev" value="${escapeAttr(SETTINGS.authWorkerUrl || "")}" /></label>
-          <label class="block"><span class="block text-xs text-erp-muted mb-1">${t("settings.authAdminKey")}</span><input id="setAuthAdminKey" type="password" class="field-input" value="${escapeAttr(SETTINGS.authAdminKey || "")}" /></label>
+          <label class="block"><span class="block text-xs text-erp-muted mb-1">${t("settings.usersBinId")}</span><input id="setUsersBinId" class="field-input" placeholder="e.g. 6642a1b2c3d4e5f6a7b8c9d0" value="${escapeAttr(SETTINGS.usersBinId || "")}" /></label>
+          <label class="block"><span class="block text-xs text-erp-muted mb-1">${t("settings.usersApiKey")}</span><input id="setUsersApiKey" type="password" class="field-input" value="${escapeAttr(SETTINGS.usersApiKey || "")}" /></label>
         </div>
+        <p class="text-[11px] text-erp-muted">${t("settings.sharedAccountsSaveNote")}</p>
+      </div>
+
+      <div class="pt-3 border-t border-erp-border space-y-2">
+        <h4 class="text-xs font-semibold uppercase tracking-wide text-erp-muted">${t("settings.shareAccounts")}</h4>
+        <p class="text-[11px] text-erp-muted">${t("settings.shareAccountsHelp")}</p>
+        <button id="exportUsersBtn" class="btn"><i data-lucide="download" style="width:14px;height:14px"></i> ${t("settings.exportUsers")}</button>
       </div>
     </div>
   `;
@@ -111,6 +124,7 @@ function wireRowButtons() {
 
 function wireUsersSection() {
   wireRowButtons();
+  document.getElementById("exportUsersBtn").addEventListener("click", exportUsersFile);
   document.getElementById("cancelEditUserBtn").addEventListener("click", resetUserForm);
   document.getElementById("addUserBtn").addEventListener("click", async () => {
     const editingEmail = document.getElementById("editingUserEmail").value;
@@ -181,10 +195,6 @@ async function renderSettings() {
           <span class="block text-[11px] text-erp-muted mt-1">${t("settings.worksheetNameHelp")}</span>
         </label>
         <p class="text-[11px] text-erp-muted">${t("settings.expectedColumns")}</p>
-        <label class="block"><span class="block text-xs font-medium text-erp-muted mb-1">${t("settings.proxyUrl")}</span>
-          <input id="setProxyUrl" class="field-input" placeholder="https://your-worker.workers.dev" value="${escapeAttr(s.proxyUrl || "")}" ${!isAdmin ? "disabled" : ""} />
-          <span class="block text-[11px] text-erp-muted mt-1">${t("settings.proxyUrlHelp")}</span>
-        </label>
         <label class="block"><span class="block text-xs font-medium text-erp-muted mb-1">${t("settings.refreshInterval")}</span>
           <select id="setInterval" class="field-input" ${!isAdmin ? "disabled" : ""}>
             <option value="0" ${s.refreshIntervalSeconds === 0 ? "selected" : ""}>${t("topbar.manual")}</option>
@@ -262,9 +272,8 @@ async function renderSettings() {
         dataSource: document.getElementById("setDataSource").value,
         sharePointUrl: document.getElementById("setUrl").value,
         worksheetName: document.getElementById("setSheet").value,
-        proxyUrl: document.getElementById("setProxyUrl").value,
-        authWorkerUrl: document.getElementById("setAuthWorkerUrl").value.trim(),
-        authAdminKey: document.getElementById("setAuthAdminKey").value,
+        usersBinId: document.getElementById("setUsersBinId").value.trim(),
+        usersApiKey: document.getElementById("setUsersApiKey").value.trim(),
         refreshIntervalSeconds: Number(document.getElementById("setInterval").value),
         dashboardTitle: document.getElementById("setTitle").value,
         companyLogo: document.getElementById("setLogo").value,
@@ -305,7 +314,6 @@ async function renderSettings() {
       }
       const url = document.getElementById("setUrl").value;
       const sheet = document.getElementById("setSheet").value;
-      SETTINGS.proxyUrl = document.getElementById("setProxyUrl").value;
       msgEl.innerHTML = msgBox(t("settings.testing"), "info");
       try {
         const result = await loadDataFromExcelUrl(url, sheet);
