@@ -27,6 +27,13 @@ function renderSuppliers() {
 
   const totalValue = suppliers.reduce((s, x) => s + x.inventoryValue, 0);
   const totalCritical = suppliers.reduce((s, x) => s + x.criticalItems, 0);
+  const isAdmin = ROLE_PERMISSIONS[CURRENT_USER.role].canEditSettings;
+
+  function creditTermsSummary(supplier) {
+    const terms = getSupplierTerms(supplier);
+    if (!terms.creditRequired) return t("sup.noCredit");
+    return terms.paymentType === "percentage" ? `${terms.paymentValue}%` : formatCurrency(terms.paymentValue);
+  }
 
   app.innerHTML = `
     <div class="space-y-6">
@@ -39,19 +46,74 @@ function renderSuppliers() {
       </div>
       <div class="card overflow-x-auto">
         <table class="erp-table">
-          <thead><tr><th>${t("sup.rank")}</th><th>${t("col.supplier")}</th><th>${t("sup.items")}</th><th>${t("col.inventoryValue")}</th><th>${t("sup.monthlyCost")}</th><th>${t("sup.avgLeadTime")}</th><th>${t("sup.criticalItems")}</th><th>${t("col.paymentRequired")}</th><th>${t("sup.score")}</th></tr></thead>
+          <thead><tr><th>${t("sup.rank")}</th><th>${t("col.supplier")}</th><th>${t("sup.items")}</th><th>${t("col.inventoryValue")}</th><th>${t("sup.monthlyCost")}</th><th>${t("sup.avgLeadTime")}</th><th>${t("sup.criticalItems")}</th><th>${t("col.paymentRequired")}</th><th>${t("sup.score")}</th><th>${t("sup.creditTerms")}</th></tr></thead>
           <tbody>
             ${suppliers
               .map(
                 (s) =>
-                  `<tr><td class="font-semibold">${s.rank}</td><td>${s.supplier}</td><td>${formatNumber(s.itemsCount)}</td><td>${formatCurrency(s.inventoryValue)}</td><td>${formatCurrency(s.monthlyCost)}</td><td>${formatNumber(s.avgLeadTime)} ${t("pd.days")}</td><td>${s.criticalItems}</td><td>${formatCurrency(s.paymentRequired)}</td><td class="font-semibold">${s.score}</td></tr>`
+                  `<tr><td class="font-semibold">${s.rank}</td><td>${escapeHtml(s.supplier)}</td><td>${formatNumber(s.itemsCount)}</td><td>${formatCurrency(s.inventoryValue)}</td><td>${formatCurrency(s.monthlyCost)}</td><td>${formatNumber(s.avgLeadTime)} ${t("pd.days")}</td><td>${s.criticalItems}</td><td>${formatCurrency(s.paymentRequired)}</td><td class="font-semibold">${s.score}</td><td>${escapeHtml(creditTermsSummary(s.supplier))}</td></tr>`
               )
               .join("")}
           </tbody>
         </table>
       </div>
+      ${
+        isAdmin
+          ? `<div class="card p-5 space-y-3">
+        <h3 class="text-sm font-semibold">${t("sup.creditTerms")}</h3>
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-2 items-end">
+          <label class="block"><span class="block text-xs text-erp-muted mb-1">${t("col.supplier")}</span>
+            <select id="ctSupplier" class="field-input">${suppliers.map((s) => `<option value="${escapeAttr(s.supplier)}">${escapeAttr(s.supplier)}</option>`).join("")}</select>
+          </label>
+          <label class="flex items-center gap-2 text-sm"><input type="checkbox" id="ctRequired" /> ${t("sup.creditRequired")}</label>
+          <label class="block"><span class="block text-xs text-erp-muted mb-1">${t("sup.paymentType")}</span>
+            <select id="ctType" class="field-input">
+              <option value="percentage">${t("sup.paymentPercentage")}</option>
+              <option value="amount">${t("sup.paymentAmount")}</option>
+            </select>
+          </label>
+          <label class="block"><span class="block text-xs text-erp-muted mb-1">${t("sup.paymentValue")}</span>
+            <input id="ctValue" type="number" min="0" step="0.01" class="field-input" />
+          </label>
+        </div>
+        <button id="ctSave" class="btn btn-primary"><i data-lucide="save" style="width:14px;height:14px"></i> ${t("sup.saveTerms")}</button>
+        <div id="ctMsg"></div>
+      </div>`
+          : ""
+      }
     </div>
   `;
+
+  if (isAdmin) {
+    const supplierSelect = document.getElementById("ctSupplier");
+    const requiredCb = document.getElementById("ctRequired");
+    const typeSelect = document.getElementById("ctType");
+    const valueInput = document.getElementById("ctValue");
+
+    function loadFormFor(supplier) {
+      const terms = getSupplierTerms(supplier);
+      requiredCb.checked = terms.creditRequired;
+      typeSelect.value = terms.paymentType;
+      valueInput.value = terms.paymentValue || "";
+    }
+    loadFormFor(supplierSelect.value);
+    supplierSelect.addEventListener("change", () => loadFormFor(supplierSelect.value));
+
+    document.getElementById("ctSave").addEventListener("click", () => {
+      const supplier = supplierSelect.value;
+      SUPPLIER_TERMS[supplier] = {
+        creditRequired: requiredCb.checked,
+        paymentType: typeSelect.value,
+        paymentValue: Number(valueInput.value) || 0,
+      };
+      saveSupplierTerms();
+      renderSuppliers();
+      const msgEl = document.getElementById("ctMsg");
+      if (msgEl) msgEl.innerHTML = msgBox(t("sup.creditSaved"), "success");
+    });
+  }
+
+  if (window.lucide) lucide.createIcons();
 }
 
 function renderBrands() {

@@ -27,6 +27,12 @@ function normalizeHeader(h) {
   return String(h || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
+function isCheckmarkValue(v) {
+  if (v === null || v === undefined) return false;
+  const s = String(v).trim().toLowerCase();
+  return ["✓", "✔", "√", "yes", "y", "true", "1"].includes(s);
+}
+
 function mapExcelRowToRawItem(row) {
   const mapped = {};
   Object.keys(row).forEach((key) => {
@@ -62,6 +68,13 @@ function mapExcelRowToRawItem(row) {
 
   const brands = {};
   BRANDS.forEach((b) => (brands[b] = false));
+  // Preferred format: one column per brand (header = brand name), marked
+  // with a checkmark (✓, or ✔/√/yes/y/true/1) for items used by that brand.
+  Object.keys(row).forEach((key) => {
+    const matchedBrand = BRANDS.find((b) => b.toLowerCase() === String(key).trim().toLowerCase());
+    if (matchedBrand && isCheckmarkValue(row[key])) brands[matchedBrand] = true;
+  });
+  // Fallback: a single combined "Brands"/"Used By" column, comma-separated.
   if (mapped.brandsRaw) {
     String(mapped.brandsRaw)
       .split(/[,;/]/)

@@ -108,6 +108,22 @@ function saveCart() {
   localStorage.setItem("erp-order-cart", JSON.stringify(ORDER_CART));
 }
 
+/* ---------- Supplier credit terms ---------- */
+
+function loadSupplierTerms() {
+  try {
+    return JSON.parse(localStorage.getItem("erp-supplier-terms") || "{}");
+  } catch {
+    return {};
+  }
+}
+function saveSupplierTerms() {
+  localStorage.setItem("erp-supplier-terms", JSON.stringify(SUPPLIER_TERMS));
+}
+function getSupplierTerms(supplier) {
+  return SUPPLIER_TERMS[supplier] || { creditRequired: false, paymentType: "percentage", paymentValue: 0 };
+}
+
 /* ---------- Global state ---------- */
 
 let SETTINGS = loadSettings();
@@ -116,11 +132,13 @@ let CURRENT_USER = loadCurrentUser();
 let THEME = localStorage.getItem("erp-theme") || "light";
 let PURCHASE_ORDERS = loadPOs();
 let ORDER_CART = loadCart();
+let SUPPLIER_TERMS = loadSupplierTerms();
 let DATA = buildAppData(42);
 let currentGridApi = null;
 let autoRefreshTimer = null;
 let PP_VIEW = "all";
 let PP_SEARCH = "";
+let PP_FILTERS = { source: "All", category: "All", supplier: "All", priority: "All" };
 
 function applyTheme(theme) {
   document.documentElement.classList.toggle("dark", theme === "dark");
@@ -277,24 +295,115 @@ function exportToExcel(rows, filename) {
   const buf = XLSX.write(wb, { type: "array", bookType: "xlsx" });
   downloadBlob(new Blob([buf], { type: "application/octet-stream" }), `${filename}.xlsx`);
 }
-function exportToPDF(rows, filename, title) {
+// Rasterizes a hidden HTML container into a paginated landscape A4 PDF
+// and saves it. Shared by exportToPDF (tabular reports) and PO document
+// export. Using the browser's own rendering (via html2canvas) instead of
+// jsPDF's built-in text API is what fixes Arabic — jsPDF's built-in fonts
+// only support Latin1/WinAnsi, which is why Arabic text used to come out
+// as mojibode; this sidesteps that entirely.
+async function renderContainerToPDF(container, filename, orientation) {
   const { jsPDF } = window.jspdf;
-  const doc = new jsPDF({ orientation: "landscape" });
-  doc.setFontSize(14);
-  doc.text(title || "Report", 14, 15);
-  if (rows.length > 0) {
-    const columns = Object.keys(rows[0]);
-    const body = rows.map((r) => columns.map((c) => String(r[c] ?? "")));
-    doc.autoTable({ head: [columns], body, startY: 20, styles: { fontSize: 7 }, headStyles: { fillColor: [11, 37, 69] } });
+  document.body.appendChild(container);
+  try {
+    const canvas = await html2canvas(container, { scale: 2, backgroundColor: "#ffffff" });
+    const doc = new jsPDF({ orientation: orientation || "landscape", unit: "mm", format: "a4" });
+    const pageWidthMM = doc.internal.pageSize.getWidth();
+    const pageHeightMM = doc.internal.pageSize.getHeight();
+    const marginMM = 8;
+    const usableWidthMM = pageWidthMM - marginMM * 2;
+    const pxPerMM = canvas.width / usableWidthMM;
+    const pageHeightPx = (pageHeightMM - marginMM * 2) * pxPerMM;
+
+    let renderedPx = 0;
+    let first = true;
+    while (renderedPx < canvas.height) {
+      const sliceHeightPx = Math.min(pageHeightPx, canvas.height - renderedPx);
+      const pageCanvas = document.createElement("canvas");
+      pageCanvas.width = canvas.width;
+      pageCanvas.height = sliceHeightPx;
+      pageCanvas.getContext("2d").drawImage(canvas, 0, renderedPx, canvas.width, sliceHeightPx, 0, 0, canvas.width, sliceHeightPx);
+      const imgData = pageCanvas.toDataURL("image/png");
+      if (!first) doc.addPage();
+      doc.addImage(imgData, "PNG", marginMM, marginMM, usableWidthMM, sliceHeightPx / pxPerMM);
+      renderedPx += sliceHeightPx;
+      first = false;
+    }
+
+    const totalPages = doc.internal.getNumberOfPages();
+    for (let p = 1; p <= totalPages; p++) {
+      doc.setPage(p);
+      doc.setFontSize(8);
+      doc.setTextColor(140);
+      doc.text(`${p} / ${totalPages}`, pageWidthMM - marginMM, pageHeightMM - 3, { align: "right" });
+    }
+
+    doc.save(`${filename}.pdf`);
+    return doc;
+  } finally {
+    container.remove();
   }
-  doc.save(`${filename}.pdf`);
+}
+
+function escapeHtml(s) {
+  return String(s ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+async function exportToPDF(rows, filename, title) {
+  const rtl = SETTINGS.locale === "ar";
+  const headerColor = SETTINGS.headerColor || "#0B2545";
+  const accentColor = SETTINGS.primaryColor || "#2E6BE6";
+  const columns = rows.length ? Object.keys(rows[0]) : [];
+  const align = rtl ? "right" : "left";
+
+  const container = document.createElement("div");
+  container.style.position = "fixed";
+  container.style.left = "-99999px";
+  container.style.top = "0";
+  container.style.background = "#ffffff";
+  container.style.padding = "28px";
+  container.style.fontFamily = "'Segoe UI', Tahoma, Arial, sans-serif";
+  container.dir = rtl ? "rtl" : "ltr";
+
+  container.innerHTML = `
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;border-bottom:3px solid ${accentColor};padding-bottom:14px;margin-bottom:16px;white-space:nowrap;">
+      <div>
+        <div style="font-size:20px;font-weight:700;color:${headerColor};">${escapeHtml(SETTINGS.dashboardTitle || "Inventory ERP")}</div>
+        <div style="font-size:13px;color:#64748B;margin-top:2px;">${escapeHtml(title || "Report")}</div>
+      </div>
+      <div style="font-size:10px;color:#64748B;text-align:${rtl ? "left" : "right"};">
+        <div>${escapeHtml(t("pdf.generatedOn"))}: ${escapeHtml(new Date().toLocaleString("en-US"))}</div>
+        <div>${rows.length} ${escapeHtml(t("pdf.records"))}</div>
+      </div>
+    </div>
+    <table style="border-collapse:collapse;font-size:11px;">
+      <thead>
+        <tr style="background:${headerColor};color:#ffffff;">
+          ${columns.map((c) => `<th style="padding:7px 10px;text-align:${align};border:1px solid ${headerColor};white-space:nowrap;">${escapeHtml(c)}</th>`).join("")}
+        </tr>
+      </thead>
+      <tbody>
+        ${rows
+          .map(
+            (r, idx) => `
+          <tr style="background:${idx % 2 === 0 ? "#ffffff" : "#F4F6FA"};">
+            ${columns.map((c) => `<td style="padding:5px 10px;border:1px solid #E3E8F0;text-align:${align};white-space:nowrap;">${escapeHtml(r[c])}</td>`).join("")}
+          </tr>`
+          )
+          .join("")}
+      </tbody>
+    </table>
+  `;
+  return renderContainerToPDF(container, filename, "landscape");
 }
 
 /* ---------- Order attribution ---------- */
 
 function getOrderedByMap() {
   const map = {};
-  PURCHASE_ORDERS.forEach((po) => {
+  PURCHASE_ORDERS.filter((po) => po.status !== "Cancelled").forEach((po) => {
     po.lines.forEach((line) => {
       if (!map[line.itemCode]) map[line.itemCode] = [];
       map[line.itemCode].push({ poNumber: po.poNumber, orderedBy: po.createdBy || "-", orderedAt: po.createdAt, qty: line.qty });

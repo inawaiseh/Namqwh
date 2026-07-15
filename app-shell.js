@@ -128,14 +128,14 @@ function renderTopbarHTML() {
       </select>
       <button id="refreshBtn" title="Refresh now" class="p-2 rounded-lg hover:bg-white/10"><i id="refreshIcon" data-lucide="refresh-cw" style="width:17px;height:17px"></i></button>
       <button id="themeBtn" title="Toggle theme" class="p-2 rounded-lg hover:bg-white/10"><i data-lucide="${THEME === "light" ? "moon" : "sun"}" style="width:17px;height:17px"></i></button>
-      <a href="#/purchase-planning" class="relative p-2 rounded-lg hover:bg-white/10" title="${t("topbar.myOrderList")}">
+      <a href="#/purchase-planning?source=manual" class="relative p-2 rounded-lg hover:bg-white/10" title="${t("topbar.myOrderList")}">
         <i data-lucide="shopping-cart" style="width:17px;height:17px"></i>
         ${cartCount > 0 ? `<span class="absolute -top-0.5 -right-0.5 bg-erp-accent text-[10px] leading-none rounded-full px-1.5 py-1 font-bold">${cartCount}</span>` : ""}
       </a>
-      <div class="relative p-2 rounded-lg hover:bg-white/10 cursor-pointer" title="Alerts">
+      <a href="#/alerts" class="relative p-2 rounded-lg hover:bg-white/10" title="${t("nav.alerts")}">
         <i data-lucide="bell" style="width:17px;height:17px"></i>
         ${criticalCount > 0 ? `<span class="absolute -top-0.5 -right-0.5 bg-erp-critical text-[10px] leading-none rounded-full px-1.5 py-1 font-bold">${criticalCount}</span>` : ""}
-      </div>
+      </a>
       <div class="relative group">
         <button id="userBtn" class="flex items-center gap-1 bg-white/10 border border-white/10 rounded-lg px-3 py-2 text-xs">${escapeAttr(CURRENT_USER.name || CURRENT_USER.email)} <i data-lucide="chevron-down" style="width:14px;height:14px"></i></button>
         <div class="absolute right-0 mt-1 hidden group-hover:block bg-white text-slate-800 rounded-lg shadow-cardHover border border-erp-border py-1 z-40" style="width:12rem">
@@ -247,7 +247,7 @@ function render() {
   else if (seg === "brands" && param) renderBrandDetail(decodeURIComponent(param));
   else if (seg === "brands") renderBrands();
   else if (seg === "analytics") renderAnalytics();
-  else if (seg === "purchase-planning") renderPurchasePlanning();
+  else if (seg === "purchase-planning") renderPurchasePlanning(route.query.get("source"));
   else if (seg === "alerts") renderAlerts();
   else if (seg === "settings") renderSettings();
   else {

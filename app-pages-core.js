@@ -258,6 +258,8 @@ function renderCategory(slug) {
     supplierMap[i.supplier] = (supplierMap[i.supplier] || 0) + i.inventoryValue;
   });
 
+  const suppliers = ["All", ...new Set(items.map((i) => i.supplier).filter(Boolean))];
+
   app.innerHTML = `
     <div class="space-y-6">
       <div><h1 class="text-xl font-bold">${t("nav." + slug)}</h1><p class="text-sm text-erp-muted">${t("cat.subtitle")}</p></div>
@@ -271,7 +273,19 @@ function renderCategory(slug) {
         ${kpiCard(t("kpi.itemsToOrder"), formatNumber(itemsToOrder), "shopping-cart", "warning")}
       </div>
       <div class="card p-4"><h3 class="text-sm font-semibold mb-2">${t("cat.valueBySupplier")}</h3><div id="chartCatSupplier" style="height:320px"></div></div>
+
+      <div class="card p-3 flex flex-wrap gap-2 items-center">
+        <div class="relative">
+          <i data-lucide="search" style="width:14px;height:14px" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400"></i>
+          <input id="catSearch" placeholder="${t("inv.searchPlaceholder")}" class="field-input" style="width:16rem;padding-left:2rem" />
+        </div>
+        <select id="catSupplier" class="field-input" style="width:auto">${suppliers.map((c) => `<option value="${escapeAttr(c)}">${c === "All" ? t("inv.allSuppliers") : c}</option>`).join("")}</select>
+        <select id="catCriticality" class="field-input" style="width:auto">${["All", "High", "Medium", "Low"].map((c) => `<option value="${c}">${c === "All" ? t("inv.allCriticality") : t("crit." + c)}</option>`).join("")}</select>
+        <select id="catOrderStatus" class="field-input" style="width:auto">${["All", "Order Now", "In Stock", "On Order", "Over Stock", "Critical"].map((c) => `<option value="${c}">${c === "All" ? t("inv.allOrderStatus") : t("status." + c)}</option>`).join("")}</select>
+        <select id="catBrand" class="field-input" style="width:auto"><option value="All">${t("inv.allBrands")}</option>${BRANDS.map((b) => `<option value="${b}">${b}</option>`).join("")}</select>
+      </div>
       <div id="grid" class="ag-theme-quartz rounded-xl2 overflow-hidden border border-erp-border shadow-card" style="height:560px;width:100%"></div>
+      <div id="catCount" class="text-xs text-erp-muted"></div>
     </div>
   `;
   echarts.init(document.getElementById("chartCatSupplier")).setOption({
@@ -279,5 +293,31 @@ function renderCategory(slug) {
     legend: { bottom: 0, textStyle: { fontSize: 10 } },
     series: [{ type: "pie", radius: ["40%", "70%"], data: Object.entries(supplierMap).map(([name, value]) => ({ name, value: +value.toFixed(0) })) }],
   });
+
   createInventoryGrid("grid", items);
+
+  function computeFiltered() {
+    const supplier = document.getElementById("catSupplier").value;
+    const criticality = document.getElementById("catCriticality").value;
+    const orderStatus = document.getElementById("catOrderStatus").value;
+    const brand = document.getElementById("catBrand").value;
+    return items.filter((i) => {
+      if (supplier !== "All" && i.supplier !== supplier) return false;
+      if (criticality !== "All" && i.criticality !== criticality) return false;
+      if (orderStatus !== "All" && i.orderStatus !== orderStatus) return false;
+      if (brand !== "All" && !i.brands[brand]) return false;
+      return true;
+    });
+  }
+  function refresh() {
+    const filtered = computeFiltered();
+    currentGridApi.setGridOption("rowData", filtered);
+    currentGridApi.setGridOption("quickFilterText", document.getElementById("catSearch").value);
+    document.getElementById("catCount").textContent = `${filtered.length} ${t("inv.of")} ${items.length} ${t("inv.itemsShown")}`;
+  }
+  ["catSupplier", "catCriticality", "catOrderStatus", "catBrand"].forEach((id) => {
+    document.getElementById(id).addEventListener("change", refresh);
+  });
+  document.getElementById("catSearch").addEventListener("input", refresh);
+  refresh();
 }
