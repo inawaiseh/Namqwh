@@ -35,7 +35,7 @@ const defaultSettings = {
   worksheetName: "",
   usersBinId: "",
   usersApiKey: "",
-  itemsBinId: "",
+  githubToken: "",
   refreshIntervalSeconds: 60,
   dataSource: "upload",
   locale: "en",

@@ -168,8 +168,7 @@ function wireUsersSection() {
 
 function currentSourceLabel(s) {
   if (s.dataSource === "live") return t("settings.sourceLive");
-  if (hasItemsSharedStore()) return t("settings.sourceUploadShared");
-  if (loadCachedItems()) return t("settings.sourceUpload");
+  if (s.dataSource === "upload") return t("settings.sourceUploadShared");
   return t("settings.sourceSample");
 }
 
@@ -207,7 +206,12 @@ async function renderSettings() {
         <p class="text-[11px] text-erp-muted">${t("settings.expectedColumns")}</p>
 
         <div class="pt-3 border-t border-erp-border space-y-2">
-          <h4 class="text-xs font-semibold uppercase tracking-wide text-erp-muted">${t("settings.uploadFileTitle")}</h4>
+          <div class="flex items-center justify-between flex-wrap gap-2">
+            <h4 class="text-xs font-semibold uppercase tracking-wide text-erp-muted">${t("settings.uploadFileTitle")}</h4>
+            <span class="text-[11px] font-medium px-2 py-1 rounded-full ${hasGithubWriteAccess() ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "bg-amber-50 text-amber-700 border border-amber-200"}">
+              ${hasGithubWriteAccess() ? t("settings.uploadPushes") : t("settings.uploadLocalOnly")}
+            </span>
+          </div>
           <p class="text-[11px] text-erp-muted">${t("settings.uploadFileHelp")}</p>
           ${
             isAdmin
@@ -218,10 +222,10 @@ async function renderSettings() {
               : ""
           }
           <div id="uploadMsg"></div>
-          <label class="block"><span class="block text-xs text-erp-muted mb-1">${t("settings.itemsBinId")}</span>
-            <input id="setItemsBinId" class="field-input" placeholder="e.g. 6642a1b2c3d4e5f6a7b8c9d1" value="${escapeAttr(s.itemsBinId || "")}" ${!isAdmin ? "disabled" : ""} />
+          <label class="block"><span class="block text-xs text-erp-muted mb-1">${t("settings.githubToken")}</span>
+            <input id="setGithubToken" type="password" class="field-input" placeholder="github_pat_..." value="${escapeAttr(s.githubToken || "")}" ${!isAdmin ? "disabled" : ""} />
           </label>
-          <p class="text-[11px] text-erp-muted">${t("settings.itemsBinIdHelp")}</p>
+          <p class="text-[11px] text-erp-muted">${t("settings.githubTokenHelp")}</p>
         </div>
 
         <div class="pt-3 border-t border-erp-border space-y-2">
@@ -309,7 +313,7 @@ async function renderSettings() {
         dataSource: document.getElementById("setDataSource").value,
         sharePointUrl: document.getElementById("setUrl").value,
         worksheetName: document.getElementById("setSheet").value,
-        itemsBinId: document.getElementById("setItemsBinId").value.trim(),
+        githubToken: document.getElementById("setGithubToken").value.trim(),
         usersBinId: document.getElementById("setUsersBinId").value.trim(),
         usersApiKey: document.getElementById("setUsersApiKey").value.trim(),
         refreshIntervalSeconds: Number(document.getElementById("setInterval").value),
@@ -337,7 +341,7 @@ async function renderSettings() {
       await renderSettings();
       const msgEl = document.getElementById("setMsg");
       if (msgEl) msgEl.innerHTML = msgBox(t("settings.savedMsg"), "success");
-      if (SETTINGS.dataSource === "upload" && hasItemsSharedStore()) {
+      if (SETTINGS.dataSource === "upload") {
         await syncSharedItems(true);
         await renderSettings();
       } else if (SETTINGS.dataSource === "live" && SETTINGS.sharePointUrl) {

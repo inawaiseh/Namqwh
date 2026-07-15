@@ -218,50 +218,96 @@ function saveCachedItems(rawItems) {
   localStorage.setItem("erp-uploaded-items", JSON.stringify(rawItems));
 }
 
-/* ---------- Shared items store (jsonbin.io — same account as Users) ---------- */
+/* ---------- Shared items store — your own GitHub repo, no third party ----------
+   No outside service at all: the parsed upload is committed straight into
+   this app's own GitHub repo as a small JSON file.
+   1. READ (always on, needs nothing): the file is public in your repo, so
+      every device fetches it directly from raw.githubusercontent.com —
+      no key, no account, no setup, works the moment the file exists.
+   2. WRITE (Settings -> Data Source, admin only): the admin's own device
+      has a GitHub token (from their own GitHub account, scoped to just
+      this repo's contents) so only that device can commit a new upload.
+   ------------------------------------------------------------------------ */
 
-function hasItemsSharedStore() {
-  return !!(SETTINGS.itemsBinId && SETTINGS.itemsBinId.trim() && SETTINGS.usersApiKey && SETTINGS.usersApiKey.trim());
+const GITHUB_REPO_OWNER = "ibrahimnawaiseh";
+const GITHUB_REPO_NAME = "Namqwh";
+const GITHUB_DATA_PATH = "data/inventory.json";
+
+function githubRawUrl() {
+  // "HEAD" always resolves to the repo's default branch, so this works
+  // without needing to know whether it's "main" or "master".
+  return `https://raw.githubusercontent.com/${GITHUB_REPO_OWNER}/${GITHUB_REPO_NAME}/HEAD/${GITHUB_DATA_PATH}`;
 }
-function itemsStoreUrl() {
-  return `https://api.jsonbin.io/v3/b/${SETTINGS.itemsBinId.trim()}`;
+function githubApiUrl() {
+  return `https://api.github.com/repos/${GITHUB_REPO_OWNER}/${GITHUB_REPO_NAME}/contents/${GITHUB_DATA_PATH}`;
 }
+function hasGithubWriteAccess() {
+  return !!(SETTINGS.githubToken && SETTINGS.githubToken.trim());
+}
+function utf8ToBase64(str) {
+  return btoa(unescape(encodeURIComponent(str)));
+}
+
+// Reading needs nothing — the file is public in the repo.
 async function fetchRemoteItems() {
-  const res = await fetch(`${itemsStoreUrl()}/latest`, {
-    headers: { "X-Master-Key": SETTINGS.usersApiKey.trim(), "X-Bin-Meta": "false" },
-  });
+  const res = await fetch(`${githubRawUrl()}?_cb=${Date.now()}`);
+  if (res.status === 404) return []; // no file uploaded yet — not an error
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const data = await res.json();
-  if (Array.isArray(data)) return data;
-  if (data && Array.isArray(data.record)) return data.record;
-  return [];
+  return Array.isArray(data) ? data : [];
 }
+
 async function saveRemoteItems(rawItems) {
-  const res = await fetch(itemsStoreUrl(), {
-    method: "PUT",
-    headers: { "Content-Type": "application/json", "X-Master-Key": SETTINGS.usersApiKey.trim() },
-    body: JSON.stringify(rawItems),
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  if (!hasGithubWriteAccess()) {
+    const e = new Error("No GitHub token configured on this device — it can't save uploads to the repo.");
+    e.code = "NO_WRITE_ACCESS";
+    throw e;
+  }
+  const headers = {
+    Authorization: `Bearer ${SETTINGS.githubToken.trim()}`,
+    Accept: "application/vnd.github+json",
+    "Content-Type": "application/json",
+  };
+  // GitHub requires the current file's sha to update it (prevents
+  // accidentally overwriting someone else's more recent change).
+  let sha;
+  const getRes = await fetch(githubApiUrl(), { headers });
+  if (getRes.ok) {
+    sha = (await getRes.json()).sha;
+  } else if (getRes.status !== 404) {
+    throw new Error(`HTTP ${getRes.status} while checking the existing file`);
+  }
+  const body = {
+    message: `Update inventory data (${rawItems.length} items)`,
+    content: utf8ToBase64(JSON.stringify(rawItems, null, 2)),
+  };
+  if (sha) body.sha = sha;
+  const putRes = await fetch(githubApiUrl(), { method: "PUT", headers, body: JSON.stringify(body) });
+  if (!putRes.ok) {
+    let detail = "";
+    try {
+      detail = (await putRes.json()).message || "";
+    } catch {}
+    throw new Error(`HTTP ${putRes.status}${detail ? ` — ${detail}` : ""}`);
+  }
 }
 
 // Called when the admin picks a file in Settings. Parses it locally, shows
-// it immediately on this device, and — if an Items Bin is configured —
-// pushes it to the shared store so every other device picks it up too.
+// it immediately on this device, and — if this device has a GitHub token —
+// commits it to the repo so every other device picks it up too.
 async function handleFileUpload(file) {
   const result = await loadDataFromFile(file, SETTINGS.worksheetName);
   DATA = result.data;
   saveCachedItems(result.rawItems);
   setLastSyncedAt(new Date().toISOString());
   render();
-  if (hasItemsSharedStore()) {
+  if (hasGithubWriteAccess()) {
     await saveRemoteItems(result.rawItems); // let the caller surface failures
   }
   return result;
 }
 
 async function syncSharedItems(showMsg) {
-  if (!hasItemsSharedStore()) return;
   if (showMsg) showToast(t("settings.syncing"), "info");
   try {
     const rawItems = await fetchRemoteItems();
@@ -312,7 +358,7 @@ async function syncLiveData(showMsg) {
 }
 
 function performRefresh() {
-  if (SETTINGS.dataSource === "upload" && hasItemsSharedStore()) {
+  if (SETTINGS.dataSource === "upload") {
     syncSharedItems(true);
   } else if (SETTINGS.dataSource === "live" && SETTINGS.sharePointUrl) {
     syncLiveData(true);
